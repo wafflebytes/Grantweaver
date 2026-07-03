@@ -43,7 +43,7 @@ export async function runAgentTurn(ctx) {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await withRetry(() =>
       getLlm().chat.completions.create({
-        model: MODEL, max_tokens: MAX_TOKENS,
+        model: MODEL, max_tokens: MAX_TOKENS, temperature: 0.2,
         tools: OPENAI_TOOLS, messages,
       })
     );
