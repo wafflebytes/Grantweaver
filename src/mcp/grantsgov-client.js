@@ -27,8 +27,8 @@ async function callTool(name, args) {
 }
 
 export const grantsGov = {
-  async search({ keyword, oppStatuses = 'posted|forecasted', rows = 10 }) {
-    const out = await callTool('search_grants', { keyword, oppStatuses, rows });
+  async search({ keyword, oppStatuses = 'posted|forecasted', rows = 10, eligibilities }) {
+    const out = await callTool('search_grants', { keyword, oppStatuses, rows, ...(eligibilities ? { eligibilities } : {}) });
     return out.opportunities ?? [];
   },
   async fetchOpportunity(oppId) {
