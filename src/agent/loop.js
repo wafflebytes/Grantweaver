@@ -95,7 +95,9 @@ async function withRetry(fn, attempts = 3) {
     catch (e) {
       last = e;
       const status = e?.status ?? e?.response?.status;
-      const retriable = status === 429 || (status >= 500 && status < 600) || e?.code === 'ETIMEDOUT';
+      const code = e?.code ?? e?.cause?.code; // network errors nest under .cause on the openai SDK
+      const timedOut = code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'ECONNREFUSED';
+      const retriable = status === 429 || (status >= 500 && status < 600) || timedOut;
       if (!retriable || i === attempts - 1) throw e;
       const retryAfter = Number(e?.headers?.['retry-after']) * 1000;
       const delay = retryAfter > 0 ? retryAfter : 800 * 2 ** i + Math.random() * 400;

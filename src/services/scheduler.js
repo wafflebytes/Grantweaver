@@ -1,7 +1,49 @@
-// TODO: weekly digest + deadline-sweep cron registrations.
-export function startScheduler(_app) {
-  console.log('[scheduler] not yet wired — no-op');
+import cron from 'node-cron';
+import { db } from './db.js';
+import { postDigestNow } from './digest.js';
+
+export function startScheduler(app) {
+  // Weekly digest — Monday 9:00 server time (per-org cron is a v2 nicety;
+  // org.digest_cron column already exists for it).
+  cron.schedule('0 9 * * 1', async () => {
+    for (const org of await db.allOrgs()) {
+      try { await postDigestNow(app.client, org.team_id); }
+      catch (e) { console.error(`[digest:${org.team_id}]`, e?.message ?? e); }
+    }
+  });
+
+  // Daily deadline nudges — 9:15, T-14 / T-7 / T-2
+  cron.schedule('15 9 * * *', async () => {
+    for (const org of await db.allOrgs()) {
+      if (!org.digest_channel) continue;
+      const opps = await db.listOpportunities(org.team_id);
+      for (const o of opps) {
+        if (!o.close_date || ['submitted', 'awarded', 'declined'].includes(o.stage)) continue;
+        const days = Math.ceil((new Date(o.close_date) - Date.now()) / 86400000);
+        if (![14, 7, 2].includes(days)) continue;
+        await app.client.chat.postMessage({
+          channel: org.digest_channel,
+          text: `⏰ *${o.title}* is due in *${days} days*. Stage: ${o.stage}. Open my agent panel and ask me to draft or finalize.`,
+        }).catch((e) => console.error('[reminder]', e?.data?.error ?? e?.message));
+      }
+    }
+  });
+
+  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) armed');
 }
 
-/** TODO: exported for tests & manual runs once the real sweep lands. */
-export async function runDeadlineSweepOnce(_client) {}
+/** Exported for tests & manual runs (smoke step 8, T4.1). */
+export async function runDeadlineSweepOnce(client) {
+  for (const org of await db.allOrgs()) {
+    if (!org.digest_channel) continue;
+    const opps = await db.listOpportunities(org.team_id);
+    for (const o of opps) {
+      if (!o.close_date) continue;
+      const days = Math.ceil((new Date(o.close_date) - Date.now()) / 86400000);
+      if ([14, 7, 2].includes(days)) {
+        await client.chat.postMessage({ channel: org.digest_channel,
+          text: `⏰ *${o.title}* is due in *${days} days*.` });
+      }
+    }
+  }
+}

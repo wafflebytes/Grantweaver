@@ -15,7 +15,6 @@ export const TOOL_SCHEMAS = [
         query: { type: 'string', description: "Natural-language question (semantic mode) or keyword query (keyword mode). Examples: 'How did mentee attendance change this spring?' / 'attendance OR GPA OR outcomes OR survey'" },
         content_types: { type: 'string', enum: ['messages', 'files'], default: 'messages' },
         tag_hint: { type: 'string', enum: ['metric', 'story', 'testimonial', 'other'], description: 'Expected evidence kind — labels the rendered cards' },
-        render_cards: { type: 'boolean', default: true },
       },
       required: ['query'],
     },
@@ -88,16 +87,17 @@ export function buildToolbelt(ctx) {
     client.chat.postMessage({ channel: channelId, thread_ts: threadTs, ...payload });
 
   return {
-    async search_workspace({ query, content_types = 'messages', tag_hint = 'story', render_cards = true }) {
+    async search_workspace({ query, content_types = 'messages', tag_hint = 'story' }) {
       const mode = await detectSearchMode(client, teamId);
       const q = mode === 'keyword' ? expandKeywordQuery(query) : query;
       const results = await searchWorkspace(client, {
         query: q, contentTypes: content_types, actionToken, contextChannelId,
       });
-      if (render_cards) {
-        for (const ev of results.slice(0, 4)) {
-          await say({ text: `Evidence: ${ev.snippet.slice(0, 80)}`, blocks: evidenceCard({ ...ev, tag: tag_hint }) });
-        }
+      // Cards are always posted when there are hits — F5: the model must not be
+      // able to narrate strong evidence in prose only; permalink cards are the
+      // demo's "not a wrapper" proof and have to land on screen every time.
+      for (const ev of results.slice(0, 4)) {
+        await say({ text: `Evidence: ${ev.snippet.slice(0, 80)}`, blocks: evidenceCard({ ...ev, tag: tag_hint }) });
       }
       return {
         search_mode: mode,
@@ -152,7 +152,7 @@ export function buildToolbelt(ctx) {
 
     async create_draft_canvas({ title, markdown, opp_id }) {
       const citations = (markdown.match(/\]\(https?:\/\/[^)]*archives[^)]*\)/g) ?? []).length;
-      const { canvasId, canvasUrl } = await createDraftCanvas(client, { title, markdown, channelId });
+      const { canvasId, canvasUrl } = await createDraftCanvas(client, { title, markdown, channelId, userId });
       if (opp_id && teamId) await db.attachCanvas(teamId, opp_id, canvasId);
       await say({ text: `📄 Draft ready: ${title}`, blocks: draftReadyBlocks({ title, canvasUrl, citations }) });
       return { ok: true, canvas_url: canvasUrl, cited_sources: citations };
