@@ -1,4 +1,4 @@
-// TODO(T3.2): 🧵 evidence capture round-trip (docs/06 §5).
+// TODO: 🧵 evidence capture round-trip.
 export function registerReactions(_app) {
-  // no-op until T3.2
+  // no-op for now
 }

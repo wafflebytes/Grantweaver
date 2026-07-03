@@ -1,8 +1,7 @@
 // Built on Slack's agent messaging experience (agent_view), not the legacy
 // Assistant class / assistant_view. Under agent_view there is no
 // assistant_thread_started event and no thread_ts — conversations are plain
-// DMs in the app's Messages tab. See docs/12 §5 (Jul 3 finding) for the full
-// platform-migration writeup this replaces.
+// DMs in the app's Messages tab.
 import { runAgentTurn } from './agent/loop.js';
 import { db } from './services/db.js';
 
@@ -22,7 +21,7 @@ const SUGGESTED = [
 ];
 
 // Per-process de-dupe so a repeat DM-open doesn't re-greet every time.
-// T3.2 (onboarding.js) owns the real first-touch/org-aware welcome flow.
+// onboarding.js owns the real first-touch/org-aware welcome flow.
 const greeted = new Set();
 
 export function registerAssistant(app) {
@@ -56,9 +55,9 @@ export function registerAssistant(app) {
       await setStatus({ status: 'Weaving…', loading_messages: LOADING });
 
       // action_token for bot-token RTS calls — top-level on the message event
-      // under agent_view (confirmed live, T1.5 probe; see docs/12 §5).
+      // under agent_view (confirmed against a live sandbox message).
       const actionToken = message.action_token;
-      if (!actionToken) console.warn('[rts] no action_token on event — RTS bot calls may fail (see docs/12 R1)');
+      if (!actionToken) console.warn('[rts] no action_token on event — RTS bot calls may fail');
 
       const result = await runAgentTurn({
         client,

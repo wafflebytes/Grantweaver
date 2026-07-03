@@ -1,4 +1,5 @@
-// Minimal standalone Bolt listener that answers docs/12 §4's open questions.
+// Minimal standalone Bolt listener for investigating Real-Time Search API
+// behavior directly (action_token location, response shape, capability info).
 // Run: node --env-file=.env scripts/rts-probe.mjs
 // Then: open the Grantweaver agent panel in the sandbox and send: probe attendance
 import pkg from '@slack/bolt';

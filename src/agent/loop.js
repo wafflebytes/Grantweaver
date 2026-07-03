@@ -1,6 +1,5 @@
-// TEMPORARY STUB (T1.3) — makes the assistant surface fully testable before
-// the real agent engine (T2.1, docs/05 §1) replaces this file. Canned reply
-// only; no LLM call, no tools.
+// TEMPORARY STUB — makes the assistant surface fully testable before the
+// real agent engine replaces this file. Canned reply only; no LLM call, no tools.
 import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 
 export async function runAgentTurn(ctx) {

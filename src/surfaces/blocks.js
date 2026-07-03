@@ -1,5 +1,3 @@
-/** All user-facing strings must match docs/13-copy-deck.md. */
-
 export function buildFeedbackBlocks() {
   return [{
     type: 'context_actions',
