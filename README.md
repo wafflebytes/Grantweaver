@@ -1,4 +1,4 @@
-<p align="center">
+<p align="left">
   <img src="assets/grantweaver-transparent.png" alt="Grantweaver" width="180" />
 </p>
 
