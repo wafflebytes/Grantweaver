@@ -1,22 +1,22 @@
-import OpenAI from 'openai';
 import { buildToolbelt, TOOL_SCHEMAS } from './tools.js';
 import { SYSTEM_PROMPT, renderOrgContext } from '../prompts/system.js';
 import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 import { db } from '../services/db.js';
+import { fetchRecentHistory } from './memory.js';
+import { getLlm, withRetry, MODEL, MAX_TOKENS } from './llm.js';
 
-// Lazy client: constructing OpenAI() eagerly would require LLM_API_KEY at
-// import time, which breaks pure-function unit tests (chunkMarkdown, etc.)
-// that never call the LLM.
-let llm;
-function getLlm() {
-  llm ??= new OpenAI({
-    apiKey: process.env.LLM_API_KEY,
-    baseURL: process.env.LLM_BASE_URL, // Gemini compat / NVIDIA NIM / OpenRouter / Ollama
-  });
-  return llm;
-}
-const MODEL = process.env.LLM_MODEL ?? 'gemini-2.5-flash';
-const MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 4000);
+export { completeOnce } from './llm.js';
+
+// Task-timeline labels per tool (docs/27 §6.4) — texture for streamed turns.
+const TASK_LABELS = {
+  search_workspace: 'Searching your workspace',
+  search_grants: 'Checking Grants.gov',
+  get_opportunity_details: 'Reading the full notice',
+  pipeline: 'Updating your pipeline',
+  create_draft_canvas: 'Writing the draft',
+  watch: 'Setting up the watch',
+};
+
 const MAX_TURNS = 8;
 
 // TOOL_SCHEMAS stay in our internal {name, description, input_schema} shape;
@@ -55,18 +55,36 @@ export async function runAgentTurn(ctx) {
       })
     : Promise.resolve(null);
 
-  const [org, pipeline, evidenceCount, prefetch] = await Promise.all([
+  // The mention path (surface: 'channel') pre-fetches thread history itself
+  // (memory.js's fetchThreadHistory, multi-speaker prefixed) and hands it in
+  // via ctx.history — the loop must not know or care which surface it's on.
+  // The DM path (surface: 'dm') still fetches its own short window here.
+  const historyPromise = ctx.history
+    ? Promise.resolve(ctx.history)
+    : (ctx.client && ctx.channelId)
+      ? fetchRecentHistory(ctx.client, ctx.channelId, ctx.botUserId, ctx.messageTs).catch((e) => {
+          console.warn('[loop] recent-history fetch failed, continuing turn-less:', e?.message ?? e);
+          return [];
+        })
+      : Promise.resolve([]);
+
+  const [org, pipeline, evidenceCount, prefetch, history] = await Promise.all([
     ctx.teamId ? db.getOrg(ctx.teamId) : null,
     ctx.teamId ? db.listOpportunities(ctx.teamId) : [],
     ctx.teamId ? db.countEvidence(ctx.teamId) : 0,
     prefetchPromise,
+    historyPromise,
   ]);
 
   const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount, contextChannelId: ctx.contextChannelId });
   const messages = [
     { role: 'system', content: system },
+    ...history,
     { role: 'user', content: ctx.userText },
   ];
+
+  let streamer;
+  const getStreamer = () => (streamer ??= ctx.makeStreamer());
 
   let toolCalls = 0;
   if (prefetch) {
@@ -98,25 +116,28 @@ export async function runAgentTurn(ctx) {
     if (toolUses.length === 0) {
       const finalText = (msg.content ?? '').trim()
         || 'Done! Anything else I can weave for you? 🧶';
-      const streamer = ctx.makeStreamer();
       for (const chunk of chunkMarkdown(finalText, 400)) {
-        await streamer.append({ markdown_text: chunk });
+        await getStreamer().append({ markdown_text: chunk });
       }
-      await streamer.stop({ blocks: buildFeedbackBlocks() });
+      await getStreamer().stop({ blocks: buildFeedbackBlocks() });
       return { title: inferTitle(ctx.userText), toolCalls };
     }
 
     messages.push(msg);
     for (const tu of toolUses) {
       toolCalls++;
+      const label = TASK_LABELS[tu.function.name];
+      const taskId = label ? await getStreamer().task(label, 'in_progress').catch(() => null) : null;
       let result;
       try {
         const exec = toolbelt[tu.function.name];
         const input = JSON.parse(tu.function.arguments || '{}');
         result = exec ? await exec(input) : { error: `Unknown tool ${tu.function.name}` };
+        if (label) await getStreamer().task(label, 'complete', taskId).catch(() => {});
       } catch (e) {
         console.error(`[tool:${tu.function?.name}]`, e?.message ?? e);
         result = { error: `Tool "${tu.function?.name}" failed: ${e?.message ?? 'unknown error'}. Explain this gracefully to the user and offer a retry or an alternative path.` };
+        if (label) await getStreamer().task(label, 'error', taskId).catch(() => {});
       }
       messages.push({
         role: 'tool',
@@ -126,30 +147,9 @@ export async function runAgentTurn(ctx) {
     }
   }
 
-  const streamer = ctx.makeStreamer();
-  await streamer.append({ markdown_text: "That one took more steps than I allow myself 🧶 — here's where I got to. Say *continue* and I'll pick it right up." });
-  await streamer.stop({ blocks: buildFeedbackBlocks() });
+  await getStreamer().append({ markdown_text: "That one took more steps than I allow myself 🧶 — here's where I got to. Say *continue* and I'll pick it right up." });
+  await getStreamer().stop({ blocks: buildFeedbackBlocks() });
   return { title: inferTitle(ctx.userText), toolCalls };
-}
-
-async function withRetry(fn, attempts = 3) {
-  let last;
-  for (let i = 0; i < attempts; i++) {
-    try { return await fn(); }
-    catch (e) {
-      last = e;
-      const status = e?.status ?? e?.response?.status;
-      const code = e?.code ?? e?.cause?.code; // network errors nest under .cause on the openai SDK
-      const timedOut = code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'ECONNREFUSED';
-      const retriable = status === 429 || (status >= 500 && status < 600) || timedOut;
-      if (!retriable || i === attempts - 1) throw e;
-      const retryAfter = Number(e?.headers?.['retry-after']) * 1000;
-      const delay = retryAfter > 0 ? retryAfter : 800 * 2 ** i + Math.random() * 400;
-      console.warn(`[llm] ${status} — retry ${i + 1} in ${Math.round(delay)}ms`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
-  }
-  throw last;
 }
 
 function safeJson(obj, cap) {

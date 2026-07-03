@@ -11,8 +11,10 @@ export const db = {
   pool, // exposed for tests only
 
   async migrateIfNeeded() {
-    const sql = await fs.readFile(new URL('../../migrations/001_init.sql', import.meta.url), 'utf8');
-    await pool.query(sql); // file is fully idempotent (IF NOT EXISTS)
+    for (const f of ['001_init.sql', '002_phase2.sql']) {
+      const sql = await fs.readFile(new URL(`../../migrations/${f}`, import.meta.url), 'utf8');
+      await pool.query(sql); // each file is fully idempotent (IF NOT EXISTS)
+    }
   },
 
   // ── orgs ───────────────────────────────────────────────────────────
@@ -73,6 +75,173 @@ export const db = {
       'UPDATE opportunities SET list_item_id=$3 WHERE team_id=$1 AND opp_id=$2',
       [teamId, String(oppId), listItemId]);
   },
+  async setOwner(teamId, oppId, userId) {
+    await pool.query(
+      'UPDATE opportunities SET owner_user_id=$3, last_activity_at=now() WHERE team_id=$1 AND opp_id=$2',
+      [teamId, String(oppId), userId]);
+  },
+  async setFit(teamId, oppId, { fit_score, fit_rationale, eligibility_verdict, eligibility_reason }) {
+    await pool.query(
+      `UPDATE opportunities SET fit_score=$3, fit_rationale=$4, eligibility_verdict=$5,
+         eligibility_reason=$6, last_activity_at=now() WHERE team_id=$1 AND opp_id=$2`,
+      [teamId, String(oppId), fit_score ?? null, fit_rationale ?? null,
+       eligibility_verdict ?? null, eligibility_reason ?? null]);
+  },
+  async setChecklist(teamId, oppId, checklist) {
+    await pool.query(
+      'UPDATE opportunities SET checklist=$3, last_activity_at=now() WHERE team_id=$1 AND opp_id=$2',
+      [teamId, String(oppId), JSON.stringify(checklist ?? [])]);
+  },
+  async toggleChecklistItem(teamId, oppId, itemId, done) {
+    const { rows } = await pool.query(
+      'SELECT checklist FROM opportunities WHERE team_id=$1 AND opp_id=$2', [teamId, String(oppId)]);
+    const checklist = (rows[0]?.checklist ?? []).map((it) => (it.id === itemId ? { ...it, done: Boolean(done) } : it));
+    await this.setChecklist(teamId, oppId, checklist);
+    return checklist;
+  },
+  async touchActivity(teamId, oppId) {
+    await pool.query(
+      'UPDATE opportunities SET last_activity_at=now() WHERE team_id=$1 AND opp_id=$2', [teamId, String(oppId)]);
+  },
+  async setCanvasWritten(teamId, oppId) {
+    await pool.query(
+      'UPDATE opportunities SET canvas_written_at=now() WHERE team_id=$1 AND opp_id=$2', [teamId, String(oppId)]);
+  },
+
+  // ── orgs (phase 2) ─────────────────────────────────────────────────
+  async setChannels(teamId, { watched, post }) {
+    await pool.query(
+      'UPDATE orgs SET watched_channels=$2, post_channels=$3 WHERE team_id=$1',
+      [teamId, watched ?? [], post ?? []]);
+  },
+  async setOnboardingState(teamId, stateOrNull) {
+    await pool.query(
+      'UPDATE orgs SET onboarding_state=$2 WHERE team_id=$1',
+      [teamId, stateOrNull ? JSON.stringify(stateOrNull) : null]);
+  },
+  async setEligibilityFacts(teamId, facts) {
+    await pool.query(
+      'UPDATE orgs SET eligibility_facts=$2 WHERE team_id=$1',
+      [teamId, JSON.stringify(facts ?? {})]);
+  },
+  async resetOrg(teamId) {
+    // Order per docs/25 §3: tables with no FK on `orgs` first (they must
+    // survive even if the org row is somehow already gone), then the org row
+    // itself — its ON DELETE CASCADE takes opportunities/watches/evidence_index.
+    // `feedback` deliberately survives (product telemetry, not org state).
+    await pool.query('DELETE FROM pending_intents WHERE team_id=$1', [teamId]);
+    await pool.query('DELETE FROM signals WHERE team_id=$1', [teamId]);
+    await pool.query('DELETE FROM opp_activity WHERE team_id=$1', [teamId]);
+    await pool.query('DELETE FROM orgs WHERE team_id=$1', [teamId]);
+  },
+
+  // ── activity / signals ─────────────────────────────────────────────
+  async logActivity(teamId, oppId, { actor, kind, summary }) {
+    await pool.query(
+      'INSERT INTO opp_activity (team_id, opp_id, actor, kind, summary) VALUES ($1,$2,$3,$4,$5)',
+      [teamId, String(oppId), actor ?? 'agent', kind, summary]);
+  },
+  async listActivity(teamId, oppId, limit = 10) {
+    const { rows } = await pool.query(
+      'SELECT * FROM opp_activity WHERE team_id=$1 AND opp_id=$2 ORDER BY at DESC LIMIT $3',
+      [teamId, String(oppId), limit]);
+    return rows;
+  },
+  async addSignal(teamId, { kind, subject, detail }) {
+    await pool.query(
+      'INSERT INTO signals (team_id, kind, subject, detail) VALUES ($1,$2,$3,$4)',
+      [teamId, kind, subject, detail ?? null]);
+  },
+  async countSignalsSince(teamId, kind, subject, hours) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM signals
+       WHERE team_id=$1 AND kind=$2 AND subject=$3 AND created_at > now() - ($4 || ' hours')::interval`,
+      [teamId, kind, subject, hours]);
+    return rows[0].n;
+  },
+  async listNotRelevant(teamId) {
+    const { rows } = await pool.query(
+      "SELECT subject, detail FROM signals WHERE team_id=$1 AND kind='not_relevant' ORDER BY created_at DESC",
+      [teamId]);
+    return rows;
+  },
+
+  // ── watches ────────────────────────────────────────────────────────
+  async addWatch(teamId, { kind, params, created_by }) {
+    const { rows } = await pool.query(
+      'INSERT INTO watches (team_id, kind, params, created_by) VALUES ($1,$2,$3,$4) RETURNING *',
+      [teamId, kind, JSON.stringify(params ?? {}), created_by ?? null]);
+    return rows[0];
+  },
+  async listWatches(teamId) {
+    const { rows } = await pool.query('SELECT * FROM watches WHERE team_id=$1 ORDER BY created_at DESC', [teamId]);
+    return rows;
+  },
+  async updateWatchSeen(watchId, { last_run_at, last_seen_ids }) {
+    await pool.query(
+      'UPDATE watches SET last_run_at=$2, last_seen_ids=$3 WHERE id=$1',
+      [watchId, last_run_at ?? new Date(), last_seen_ids ?? []]);
+  },
+  async removeWatch(teamId, watchId) {
+    await pool.query('DELETE FROM watches WHERE team_id=$1 AND id=$2', [teamId, watchId]);
+  },
+
+  // ── evidence index ─────────────────────────────────────────────────
+  async upsertIndexRow(teamId, row) {
+    await pool.query(
+      `INSERT INTO evidence_index (team_id, theme, channel_id, channel_name, strength, hits, permalinks, has_files)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (team_id, theme, channel_id) DO UPDATE SET
+         channel_name=EXCLUDED.channel_name, strength=EXCLUDED.strength, hits=EXCLUDED.hits,
+         permalinks=EXCLUDED.permalinks, has_files=EXCLUDED.has_files, scanned_at=now()`,
+      [teamId, row.theme, row.channel_id, row.channel_name ?? null, row.strength ?? 'solid',
+       row.hits ?? 0, row.permalinks ?? [], row.has_files ?? false]);
+  },
+  async listIndex(teamId) {
+    const { rows } = await pool.query(
+      'SELECT * FROM evidence_index WHERE team_id=$1 ORDER BY theme, channel_name', [teamId]);
+    return rows;
+  },
+  async clearIndex(teamId) {
+    await pool.query('DELETE FROM evidence_index WHERE team_id=$1', [teamId]);
+  },
+
+  // ── pending intents (confirm-before-generate, docs/23 §5) ─────────
+  async createIntent(teamId, { kind, params, requested_by, channel_id }) {
+    const { rows } = await pool.query(
+      `INSERT INTO pending_intents (team_id, kind, params, requested_by, channel_id)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [teamId, kind, JSON.stringify(params ?? {}), requested_by ?? null, channel_id ?? null]);
+    return rows[0];
+  },
+  async setIntentMessage(intentId, messageTs) {
+    await pool.query('UPDATE pending_intents SET message_ts=$2 WHERE id=$1', [intentId, messageTs]);
+  },
+  async getIntentByMessage(channelId, messageTs) {
+    const { rows } = await pool.query(
+      'SELECT * FROM pending_intents WHERE channel_id=$1 AND message_ts=$2', [channelId, messageTs]);
+    return rows[0] ?? null;
+  },
+  async claimIntent(intentId) {
+    // Atomic pending→running so a double-click (button + ✅ reaction, or two
+    // clicks) only ever wins once — the UPDATE...RETURNING only returns a row
+    // when the WHERE clause matched pre-update, so a second concurrent caller
+    // gets an empty result set.
+    const { rows } = await pool.query(
+      `UPDATE pending_intents SET status='running' WHERE id=$1 AND status='pending' RETURNING *`,
+      [intentId]);
+    return rows[0] ?? null;
+  },
+  async finishIntent(intentId, status) {
+    await pool.query('UPDATE pending_intents SET status=$2 WHERE id=$1', [intentId, status]);
+  },
+  async expireStaleIntents(hours = 24) {
+    const { rows } = await pool.query(
+      `UPDATE pending_intents SET status='expired'
+       WHERE status='pending' AND created_at < now() - ($1 || ' hours')::interval RETURNING id`,
+      [hours]);
+    return rows.length;
+  },
 
   // ── evidence: POINTERS ONLY ────────────────────────────────────────
   // This DAL must never accept content. Guard enforces it at runtime too.
@@ -97,6 +266,16 @@ export const db = {
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM evidence_pointers WHERE team_id=$1', [teamId]);
     return rows[0].n;
+  },
+  async linkEvidenceToOpp(teamId, channelId, messageTs, oppId) {
+    await pool.query(
+      'UPDATE evidence_pointers SET opp_id=$4 WHERE team_id=$1 AND channel_id=$2 AND message_ts=$3',
+      [teamId, channelId, messageTs, String(oppId)]);
+  },
+  async setEvidenceStrength(teamId, channelId, messageTs, strength) {
+    await pool.query(
+      'UPDATE evidence_pointers SET strength=$4 WHERE team_id=$1 AND channel_id=$2 AND message_ts=$3',
+      [teamId, channelId, messageTs, strength]);
   },
 
   // ── feedback & meter ───────────────────────────────────────────────

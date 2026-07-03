@@ -1,9 +1,9 @@
 import { searchWorkspace, detectSearchMode, expandKeywordQuery } from './rts.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { db } from '../services/db.js';
-import { createDraftCanvas } from '../services/canvas.js';
 import { syncOpportunityToList } from '../services/lists.js';
-import { grantCard, evidenceCard, draftReadyBlocks } from '../surfaces/blocks.js';
+import { grantCardV2, evidenceCardV2, confirmCard } from '../surfaces/cards.js';
+import { stashDraftMarkdown } from './intents.js';
 
 export const TOOL_SCHEMAS = [
   {
@@ -69,7 +69,8 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'create_draft_canvas',
-    description: 'Create a Slack Canvas with a complete grant document draft (LOI, proposal section, funder report) and share it into this thread. markdown must be the FULL document with inline [source](permalink) citations, following the drafting skeleton. Links canvas to a pipeline opportunity when opp_id given.',
+    description:
+      "Write a complete grant document draft (LOI, proposal section, funder report) into the opportunity's persistent canvas (Draft section — the canvas already exists per opportunity and is edited in place, never recreated). markdown must be the FULL document with inline [source](permalink) citations. In interactive contexts this queues a confirmation card instead of writing immediately.",
     input_schema: {
       type: 'object',
       properties: {
@@ -97,8 +98,9 @@ export function buildToolbelt(ctx) {
       // Cards are always posted when there are hits — F5: the model must not be
       // able to narrate strong evidence in prose only; permalink cards are the
       // demo's "not a wrapper" proof and have to land on screen every time.
+      const pipeline = teamId ? await db.listOpportunities(teamId) : [];
       for (const ev of results.slice(0, 4)) {
-        await say({ text: `Evidence: ${ev.snippet.slice(0, 80)}`, blocks: evidenceCard({ ...ev, tag: tag_hint }) });
+        await say({ text: `Evidence: ${ev.snippet.slice(0, 80)}`, blocks: evidenceCardV2({ ...ev, tag: tag_hint }, { pipeline }) });
       }
       return {
         search_mode: mode,
@@ -119,7 +121,7 @@ export function buildToolbelt(ctx) {
       const scored = opps.map((o) => ({ ...o, ...scoreMatch(o, org) }))
         .sort((a, b) => b.match_score - a.match_score);
       if (render_cards) {
-        for (const o of scored.slice(0, 3)) await say({ text: o.title, blocks: grantCard(o) });
+        for (const o of scored.slice(0, 3)) await say({ text: o.title, blocks: grantCardV2(o) });
       }
       return { count: scored.length, opportunities: scored.slice(0, rows) };
     },
@@ -154,12 +156,33 @@ export function buildToolbelt(ctx) {
       return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored).' };
     },
 
+    // Confirm-before-generate (docs/23 §5, docs/27 §1.1): the model has
+    // already written the full draft as this tool call's argument — what's
+    // deferred is publishing it. The actual canvas write happens in
+    // agent/intents.js's draft executor once the user confirms.
     async create_draft_canvas({ title, markdown, opp_id }) {
+      if (!teamId) return { error: 'No team context' };
       const citations = (markdown.match(/\]\(https?:\/\/[^)]*archives[^)]*\)/g) ?? []).length;
-      const { canvasId, canvasUrl } = await createDraftCanvas(client, { title, markdown, channelId, userId });
-      if (opp_id && teamId) await db.attachCanvas(teamId, opp_id, canvasId);
-      await say({ text: `📄 Draft ready: ${title}`, blocks: draftReadyBlocks({ title, canvasUrl, citations }) });
-      return { ok: true, canvas_url: canvasUrl, cited_sources: citations };
+      const opp = opp_id ? (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id)) : null;
+      // Class-A guard: the generated markdown can contain verbatim quoted
+      // Slack content (citations copy source text exactly) — it must never
+      // reach a persisted column. Only opp_id (no message content) goes into
+      // the DB row; the actual draft text is stashed in-process (intents.js)
+      // for the confirmed executor to pick up.
+      const intent = await db.createIntent(teamId, {
+        kind: 'draft',
+        params: { opp_id: opp_id ?? null },
+        requested_by: userId,
+        channel_id: channelId,
+      });
+      stashDraftMarkdown(intent.id, { title, markdown });
+      const summary = `${title}${citations ? ` using **${citations} cited workspace source${citations === 1 ? '' : 's'}**` : ''}. I'll write it into ${opp ? `the *${opp.title}*` : 'a new'} opportunity's canvas.`;
+      const posted = await say({ text: `Ready to weave: ${title}`, blocks: confirmCard(intent, { summary, etaSeconds: 15 }) });
+      await db.setIntentMessage(intent.id, posted.ts);
+      return {
+        ok: true, queued: true,
+        note: 'A confirmation card was posted in this thread. Tell the user in ONE short line that you have lined up the draft and they should confirm on the card above (button or a ✅ reaction) before you continue — do not describe or repeat the draft contents yet.',
+      };
     },
   };
 }

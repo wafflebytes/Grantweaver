@@ -29,7 +29,14 @@ export function startScheduler(app) {
     }
   });
 
-  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) armed');
+  // Intent expiry (docs/22 §1): a confirm card nobody ever clicked shouldn't
+  // stay "pending" forever — sweep hourly.
+  cron.schedule('0 * * * *', async () => {
+    const n = await db.expireStaleIntents(24).catch((e) => { console.error('[intents:expire]', e?.message ?? e); return 0; });
+    if (n) console.log(`[intents] expired ${n} stale pending intent(s)`);
+  });
+
+  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) + hourly intent-expiry armed');
 }
 
 /** Exported for tests & manual runs. */

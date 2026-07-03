@@ -3,6 +3,7 @@
 // assistant_thread_started event and no thread_ts — conversations are plain
 // DMs in the app's Messages tab.
 import { runAgentTurn } from './agent/loop.js';
+import { makeDmStreamer } from './agent/streamer.js';
 import { db } from './services/db.js';
 
 const LOADING = [
@@ -13,12 +14,35 @@ const LOADING = [
   'Weaving it all together…',
 ];
 
-const SUGGESTED = [
+// State-aware suggested prompts (docs/23 §10, copy docs/27 §6.8).
+const NO_ORG_PROMPTS = [
+  { title: 'Set up my organization',            message: 'Help me set up my organization profile.' },
+  { title: 'What can you do?',                  message: 'What can you do?' },
+  { title: 'Find grants for a youth nonprofit', message: 'Find grants for a youth nonprofit.' },
+  { title: 'How do you handle our data?',       message: 'How do you handle our data?' },
+];
+const DEFAULT_PROMPTS = [
   { title: 'Find matching grants',   message: 'Find new grants that fit our mission and programs.' },
   { title: 'Gather impact evidence', message: 'What impact evidence do we have from the last 90 days?' },
   { title: "What's due soon?",       message: "What's due in the next 30 days across our grant pipeline?" },
   { title: 'Draft an LOI',           message: 'Draft a letter of intent for our top pipeline opportunity.' },
 ];
+const ACTIVE_DRAFT_EXTRA = { title: 'What changed in my drafts?', message: 'What changed in my drafts?' };
+const DEADLINE_WEEK_EXTRA = { title: "What's due this week?", message: "What's due this week?" };
+
+export function buildSuggestedPrompts({ org, pipeline = [] }) {
+  if (!org?.mission) return NO_ORG_PROMPTS;
+  const hasActiveDraft = pipeline.some((o) => o.stage === 'drafting');
+  const deadlineThisWeek = pipeline.some((o) => {
+    if (!o.close_date || ['awarded', 'declined'].includes(o.stage)) return false;
+    const days = Math.ceil((new Date(o.close_date) - Date.now()) / 86400000);
+    return days <= 7 && days >= 0;
+  });
+  let prompts = [...DEFAULT_PROMPTS];
+  if (deadlineThisWeek) prompts = [DEADLINE_WEEK_EXTRA, ...prompts.filter((p) => p.title !== "What's due soon?")];
+  if (hasActiveDraft) prompts = [...prompts.filter((p) => p.title !== 'Draft an LOI'), ACTIVE_DRAFT_EXTRA];
+  return prompts.slice(0, 4);
+}
 
 // Per-process de-dupe so a repeat DM-open doesn't re-greet every time.
 // onboarding.js owns the real first-touch/org-aware welcome flow.
@@ -28,16 +52,17 @@ export function registerAssistant(app) {
   app.event('app_home_opened', async ({ event, client, context }) => {
     if (event.tab !== 'messages') return;
     try {
+      const org = context.teamId ? await db.getOrg(context.teamId) : null;
+      const pipeline = context.teamId ? await db.listOpportunities(context.teamId) : [];
       await client.assistant.threads.setSuggestedPrompts({
         channel_id: event.channel,
         title: 'How can I help today?',
-        prompts: SUGGESTED,
+        prompts: buildSuggestedPrompts({ org, pipeline }),
       });
 
       if (greeted.has(event.user)) return;
       greeted.add(event.user);
 
-      const org = context.teamId ? await db.getOrg(context.teamId) : null;
       await client.chat.postMessage({
         channel: event.channel,
         text: org?.mission
@@ -67,14 +92,17 @@ export function registerAssistant(app) {
 
       const result = await runAgentTurn({
         client,
+        surface: 'dm',
         teamId: message.team ?? context.teamId,
         userId: message.user,
         channelId: channel,
         threadTs: undefined,
         contextChannelId: undefined,
         actionToken,
+        messageTs: message.ts,
+        botUserId: context.botUserId,
         userText: message.text ?? '',
-        makeStreamer: () => sayStream(),
+        makeStreamer: () => makeDmStreamer({ sayStream }),
       });
 
       console.log(`[turn] ${Date.now() - t0}ms tools=${result?.toolCalls ?? 0}`);

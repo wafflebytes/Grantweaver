@@ -23,6 +23,26 @@
         "usage_hint": "help | setup | digest",
         "should_escape": false
       }
+    ],
+    "shortcuts": [
+      {
+        "name": "Save as evidence",
+        "type": "message",
+        "callback_id": "gw_shortcut_evidence",
+        "description": "Save this message to Grantweaver's evidence locker"
+      },
+      {
+        "name": "Find grants like this",
+        "type": "message",
+        "callback_id": "gw_shortcut_find",
+        "description": "Search Grants.gov using this message as the brief"
+      },
+      {
+        "name": "What's due soon?",
+        "type": "global",
+        "callback_id": "gw_shortcut_due",
+        "description": "Your grant deadlines at a glance"
+      }
     ]
   },
   "oauth_config": {
@@ -84,8 +104,12 @@
         "search:read.files",
         "search:read.users",
         "links:read",
+        "links:write",
         "team:read",
-        "lists:write"
+        "lists:write",
+        "lists:read",
+        "app_mentions:read",
+        "files:read"
       ]
     },
     "pkce_enabled": false
@@ -95,7 +119,10 @@
       "bot_events": [
         "message.im",
         "app_home_opened",
-        "reaction_added"
+        "reaction_added",
+        "app_mention",
+        "link_shared",
+        "message.channels"
       ]
     },
     "interactivity": {
@@ -104,6 +131,7 @@
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,
     "token_rotation_enabled": false,
-    "is_mcp_enabled": true
+    "is_mcp_enabled": true,
+    "unfurl_domains": ["grantweaver.up.railway.app"]
   }
 }

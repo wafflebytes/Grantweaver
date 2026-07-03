@@ -6,6 +6,9 @@ import { registerOnboarding } from './surfaces/onboarding.js';
 import { registerCommands } from './surfaces/commands.js';
 import { registerReactions } from './surfaces/reactions.js';
 import { registerActions } from './surfaces/actions.js';
+import { registerMention } from './surfaces/mention.js';
+import { registerUnfurl } from './surfaces/unfurl.js';
+import { registerShortcuts } from './surfaces/shortcuts.js';
 import { startScheduler } from './services/scheduler.js';
 import { db } from './services/db.js';
 import { handleMcpRequest } from './mcp/grantweaver-server.mjs';
@@ -69,6 +72,9 @@ registerOnboarding(app);
 registerCommands(app);
 registerReactions(app);
 registerActions(app);
+registerMention(app);
+registerUnfurl(app);
+registerShortcuts(app);
 
 app.error(async (error) => {
   // Never crash on a handler error; never leak stack traces to users.
