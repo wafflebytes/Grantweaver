@@ -4,47 +4,66 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Grantweaver — turn your nonprofit's conversations into funding</title>
 <meta name="description" content="A Slack agent that finds grants, cites impact evidence from your own workspace, and drafts proposals your team can trust. Nothing is ever stored outside Slack.">
+<link rel="icon" type="image/png" href="logo.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header><div class="wrap">
-  <h1>🧶 Grantweaver</h1>
+  <span class="chip">A Slack agent for nonprofits</span>
+  <div class="brand"><img src="logo.png" alt="Grantweaver logo, a ball of yarn"><h1>Grantweaver</h1></div>
   <p class="tag">Turn your nonprofit's conversations into funding. A Slack agent that finds grants, cites impact evidence from your own workspace, and drafts proposals your team can trust.</p>
-  <a class="btn" href="https://slack.com/apps">Add to Slack</a>
+  <div class="cta-row">
+    <a class="btn" href="https://slack.com/app_redirect?app=A0BESSN1JP8">Open in Slack</a>
+    <a class="btn-ghost" href="#how">See how it works</a>
+  </div>
+  <span class="beta-note">Private beta. The button opens Grantweaver in a workspace where it's installed; for access, see <a href="support.html" style="color:inherit">support</a>.</span>
 </div></header>
 
 <section><div class="wrap">
-  <h2>The problem is not a lack of impact — it's buried evidence</h2>
+  <span class="eyebrow">The problem</span>
+  <h2>It's not a lack of impact. It's buried evidence.</h2>
   <div class="stats">
-    <div class="stat"><b>69%</b>of nonprofits lost funding from at least one source this year</div>
-    <div class="stat"><b>#2</b>reporting is nonprofit leaders' second-biggest stressor, after funding itself</div>
-    <div class="stat"><b>~25%</b>of staff time lost to manually compiling evidence that already exists — in Slack</div>
+    <div class="stat"><b>69%</b>of nonprofits lost funding from at least one source this year
+      <span class="src"><a href="https://cep.org/report-backpacks/state-of-nonprofits-2026/">CEP, State of Nonprofits 2026</a></span></div>
+    <div class="stat"><b>#2</b>reporting is nonprofit leaders' second-biggest stressor, after funding itself
+      <span class="src"><a href="https://www.famcare.net/the-top-5-nonprofit-reporting-pain-points-and-how-to-fix-them-before-2026/">FAMCare, Nonprofit Reporting Pain Points</a></span></div>
+    <div class="stat"><b>~25%</b>of staff time goes to manually compiling evidence that already exists, much of it in Slack
+      <span class="src"><a href="https://www.famcare.net/the-top-5-nonprofit-reporting-pain-points-and-how-to-fix-them-before-2026/">FAMCare, Nonprofit Reporting Pain Points</a></span></div>
   </div>
 </div></section>
 
-<section><div class="wrap">
+<section id="how"><div class="wrap">
+  <span class="eyebrow">The loop</span>
   <h2>How it works</h2>
-  <div class="steps">
-    <div class="step"><h3>1 · Discover</h3><p>Live Grants.gov matches, scored against your mission.</p></div>
-    <div class="step"><h3>2 · Prove</h3><p>Real-time workspace search surfaces cited evidence — metrics, stories, testimonials.</p></div>
-    <div class="step"><h3>3 · Draft</h3><p>Grounded proposals stream into a Canvas — every claim linked to its source.</p></div>
-    <div class="step"><h3>4 · Track</h3><p>Pipeline board, deadline nudges, and an honest impact meter.</p></div>
-  </div>
+  <ol class="flow">
+    <li><span class="n">1</span><h3>Discover</h3>
+      <p>Ask for grants in plain English. Grantweaver searches live Grants.gov listings and scores each match against your mission, so you see the handful worth reading instead of five hundred that happen to share a keyword.</p></li>
+    <li><span class="n">2</span><h3>Prove</h3>
+      <p>The proof funders want is already in your Slack: attendance numbers in #program-updates, a parent's thank-you in #stories. Grantweaver finds it with Slack's Real-Time Search, quotes it verbatim, and links every quote to the original message.</p></li>
+    <li><span class="n">3</span><h3>Draft</h3>
+      <p>One request turns that evidence into a proposal draft in a Slack Canvas. Every figure is cited. Anything your workspace can't back up gets marked "team to confirm" rather than invented.</p></li>
+    <li><span class="n">4</span><h3>Track</h3>
+      <p>A pipeline board in the App Home, deadline nudges before things slip, and an impact meter that counts what the agent actually saved you: hours returned, dollars applied for.</p></li>
+  </ol>
 </div></section>
 
-<section><div class="wrap">
-  <div class="privacy-box">
-    <h2>Privacy by architecture</h2>
-    <p>Grantweaver never stores your messages or files. It reads workspace content live through Slack's Real-Time Search API only when you ask, keeps <em>permalinks</em> — not content — and re-reads sources at drafting time. No training on your data. Ever.</p>
+<section class="privacy"><div class="wrap">
+  <span class="eyebrow">Privacy by architecture</span>
+  <h2>Your workspace is read, never copied.</h2>
+  <p class="lede">Grantweaver never stores your messages or files. It reads workspace content live through Slack's Real-Time Search API when you ask, keeps permalinks rather than content, and re-reads the sources at drafting time. Your data is never used to train any model.</p>
+  <div class="vault">
+    <div class="keep"><h4>What we store</h4>
+      <ul><li>The org profile you type into setup</li><li>Pipeline stages for grants you track</li><li>Links to messages you tag as evidence</li></ul></div>
+    <div class="never"><h4>What we never store</h4>
+      <ul><li>Message text or files</li><li>DMs or private conversations</li><li>Anything you didn't ask us to keep</li></ul></div>
   </div>
-  <div class="disclaimer">
-    <strong>About the AI:</strong> Grantweaver uses a large language model (provider disclosed in our submission and privacy policy). AI can make mistakes — every draft cites its sources and asks for your review before anything is submitted. Semantic workspace search requires a Slack plan with AI search; smart keyword search works on all plans, including free.
-  </div>
+  <p class="ai-note"><strong>About the AI:</strong> Grantweaver uses a large language model (provider disclosed in our submission and privacy policy). AI makes mistakes, so every draft cites its sources and waits for your review before anything goes out. Semantic workspace search needs a Slack plan with AI search; keyword search works on every plan, including free.</p>
 </div></section>
 
 <footer><div class="wrap">
-  <a href="support.html">Support</a><a href="privacy.html">Privacy</a><a href="https://github.com/wafflebytes/grantweaver">Source</a>
-  <span style="float:right">Free during beta · never per-seat</span>
+  <div class="foot-brand"><img src="logo.png" alt=""><span>Grantweaver</span></div>
+  <nav class="foot-nav"><a href="support.html">Support</a><a href="privacy.html">Privacy</a><a href="https://github.com/wafflebytes/Grantweaver">Source</a></nav>
+  <span class="foot-note">Free during beta · never per-seat</span>
 </div></footer>
 </body>
 </html>

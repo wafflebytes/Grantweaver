@@ -71,9 +71,16 @@ export async function runAgentTurn(ctx) {
   let toolCalls = 0;
   if (prefetch) {
     toolCalls++;
+    // An empty prefetch usually means the user's raw message was a poor
+    // search query (drafting instructions, not an evidence question) — in
+    // that case the model MUST re-search immediately, before the short-lived
+    // search credential expires, not after other tools have burned it.
+    const guidance = prefetch.count > 0
+      ? 'do NOT call search_workspace again unless these results are clearly insufficient for the question.'
+      : 'it found NOTHING — the raw message was probably a poor search query. If you need workspace evidence, call search_workspace with a better-phrased query as your VERY FIRST tool call, right now, before any other tool: the search credential expires within about a minute and a re-search after other tool calls will fail.';
     messages.push({
       role: 'system',
-      content: `Workspace evidence was already fetched for you immediately on message receipt, to beat the search credential's short TTL — do NOT call search_workspace again unless these results are clearly insufficient for the question. Pre-fetched results (search_mode: ${prefetch.search_mode}, count: ${prefetch.count}):\n${safeJson(prefetch, 8000)}`,
+      content: `Workspace evidence was already fetched for you immediately on message receipt, to beat the search credential's short TTL — ${guidance} Pre-fetched results (search_mode: ${prefetch.search_mode}, count: ${prefetch.count}):\n${safeJson(prefetch, 8000)}`,
     });
   }
 

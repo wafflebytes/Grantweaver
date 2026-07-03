@@ -9,9 +9,30 @@ import { registerActions } from './surfaces/actions.js';
 import { startScheduler } from './services/scheduler.js';
 import { db } from './services/db.js';
 import { handleMcpRequest } from './mcp/grantweaver-server.mjs';
+import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 
 const socketMode = process.env.SOCKET_MODE === 'true';
 const port = Number(process.env.PORT ?? 3000);
+
+// The landing/privacy/support pages ship from this same service — one Railway
+// deployment hosts the app, the MCP endpoint, and the site with no extra
+// hosting or domain to manage.
+const SITE_TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
+const sitePage = (file, routePath = `/${file}`) => ({
+  path: routePath,
+  method: ['GET'],
+  handler: async (_req, res) => {
+    try {
+      const body = await readFile(new URL(`../site/${file}`, import.meta.url));
+      res.writeHead(200, { 'content-type': SITE_TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'public, max-age=300' });
+      res.end(body);
+    } catch {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+    }
+  },
+});
 
 export const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -33,6 +54,12 @@ export const app = new App({
     // One Railway service, one port, one TLS cert — grantweaver-mcp mounts
     // here instead of running as a second process/port in prod.
     { path: '/mcp', method: ['POST'], handler: handleMcpRequest },
+    sitePage('index.html', '/'),
+    sitePage('index.html'),
+    sitePage('privacy.html'),
+    sitePage('support.html'),
+    sitePage('style.css'),
+    sitePage('logo.png'),
   ],
 });
 
