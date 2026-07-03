@@ -30,7 +30,19 @@ export async function createDraftCanvas(client, { title, markdown, channelId, us
 
 /** Canvas markdown is stricter than GitHub-flavored — normalize the common gaps. */
 export function sanitizeCanvasMarkdown(md) {
-  return String(md)
+  let s = String(md).trim();
+
+  // Live-confirmed (F7): Slack itself renders the canvas's `title` param as
+  // the document's own leading H1 when you read the canvas back — so ANY
+  // leading H1 the model writes doubles it, even when the wording doesn't
+  // match verbatim ("# LOI — X" from Slack, "# Letter of Intent — X" from the
+  // model). Strip unconditionally rather than requiring an exact-text match.
+  const leadingH1 = s.match(/^#\s+.+?\s*\n+/);
+  if (leadingH1) {
+    s = s.slice(leadingH1[0].length).trimStart();
+  }
+
+  return s
     .replace(/^(#{4,})\s/gm, '### ')      // canvases: max 3 heading levels
     .trim();
 }

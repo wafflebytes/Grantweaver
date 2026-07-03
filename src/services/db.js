@@ -63,6 +63,16 @@ export const db = {
       `UPDATE opportunities SET canvas_id=$3, stage='drafting', updated_at=now()
        WHERE team_id=$1 AND opp_id=$2`, [teamId, String(oppId), canvasId]);
   },
+  async setPipelineList(teamId, listId, columns) {
+    await pool.query(
+      'UPDATE orgs SET pipeline_list_id=$2, pipeline_list_columns=$3 WHERE team_id=$1',
+      [teamId, listId, JSON.stringify(columns)]);
+  },
+  async setOpportunityListItem(teamId, oppId, listItemId) {
+    await pool.query(
+      'UPDATE opportunities SET list_item_id=$3 WHERE team_id=$1 AND opp_id=$2',
+      [teamId, String(oppId), listItemId]);
+  },
 
   // ── evidence: POINTERS ONLY ────────────────────────────────────────
   // This DAL must never accept content. Guard enforces it at runtime too.

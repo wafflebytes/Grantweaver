@@ -8,6 +8,7 @@ import { registerReactions } from './surfaces/reactions.js';
 import { registerActions } from './surfaces/actions.js';
 import { startScheduler } from './services/scheduler.js';
 import { db } from './services/db.js';
+import { handleMcpRequest } from './mcp/grantweaver-server.mjs';
 
 const socketMode = process.env.SOCKET_MODE === 'true';
 const port = Number(process.env.PORT ?? 3000);
@@ -29,6 +30,9 @@ export const app = new App({
         res.end(JSON.stringify({ ok: true, sha: process.env.BUILD_SHA ?? 'dev', ts: new Date().toISOString() }));
       },
     },
+    // One Railway service, one port, one TLS cert — grantweaver-mcp mounts
+    // here instead of running as a second process/port in prod.
+    { path: '/mcp', method: ['POST'], handler: handleMcpRequest },
   ],
 });
 

@@ -51,8 +51,14 @@ export function registerAssistant(app) {
     if (message.channel_type !== 'im' || message.subtype || message.bot_id) return;
     const { channel } = message;
     const t0 = Date.now();
+    const eventAgeMs = message.ts ? t0 - Number(message.ts) * 1000 : null;
+    console.log(`[diag] handler start, event age ${eventAgeMs}ms (message.ts=${message.ts})`);
     try {
-      await setStatus({ status: 'Weaving…', loading_messages: LOADING });
+      // Fire-and-forget: setStatus is a Slack API round-trip purely for the
+      // loading-indicator UX. Awaiting it here would burn into the
+      // action_token's short TTL before the turn (and its evidence prefetch)
+      // even starts.
+      setStatus({ status: 'Weaving…', loading_messages: LOADING }).catch(() => {});
 
       // action_token for bot-token RTS calls — top-level on the message event
       // under agent_view (confirmed against a live sandbox message).

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkMarkdown, inferTitle } from '../src/agent/loop.js';
+import { chunkMarkdown, inferTitle, looksEvidenceShaped } from '../src/agent/loop.js';
 
 describe('chunkMarkdown', () => {
   it('chunks without dropping lines', () => {
@@ -11,5 +11,17 @@ describe('chunkMarkdown', () => {
 describe('inferTitle', () => {
   it('caps titles at 48 chars', () => {
     expect(inferTitle('x'.repeat(100)).length).toBeLessThanOrEqual(48);
+  });
+});
+
+describe('looksEvidenceShaped', () => {
+  it('flags evidence and drafting questions', () => {
+    expect(looksEvidenceShaped('What impact evidence do we have from the last 90 days?')).toBe(true);
+    expect(looksEvidenceShaped('Draft a letter of intent for our top pipeline opportunity.')).toBe(true);
+    expect(looksEvidenceShaped('How did mentee attendance change this spring?')).toBe(true);
+  });
+  it('does not flag unrelated questions', () => {
+    expect(looksEvidenceShaped("What's due in the next 30 days?")).toBe(false);
+    expect(looksEvidenceShaped('Find new grants for youth mentoring.')).toBe(false);
   });
 });

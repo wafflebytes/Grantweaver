@@ -26,12 +26,42 @@ const OPENAI_TOOLS = TOOL_SCHEMAS.map((t) => ({
   function: { name: t.name, description: t.description, parameters: t.input_schema },
 }));
 
-export async function runAgentTurn(ctx) {
-  const org = ctx.teamId ? await db.getOrg(ctx.teamId) : null;
-  const pipeline = ctx.teamId ? await db.listOpportunities(ctx.teamId) : [];
-  const evidenceCount = ctx.teamId ? await db.countEvidence(ctx.teamId) : 0;
+// The `action_token` behind Slack RTS has a ~45-135s TTL that starts ticking
+// the moment the Slack message event fires. The model's own FIRST completion
+// call competes for that same budget before it ever decides to call
+// search_workspace — evidence-first tool ordering alone isn't enough to beat
+// it (live-confirmed twice). So for evidence-shaped turns we fire
+// search_workspace ourselves, synchronously, before the first LLM call, while
+// the token is guaranteed freshest — then hand the model pre-fetched results
+// instead of making it spend its first turn deciding to ask for them.
+const EVIDENCE_INTENT = /\b(evidence|impact|attendance|gpa|grade|metric|story|stories|testimonial|workspace|mentee|mentees|outcome|outcomes|survey|beneficiar|program update|draft|loi|letter of intent|proposal|report|funder|grant report|cite|citation)\b/i;
 
+export function looksEvidenceShaped(text) {
+  return EVIDENCE_INTENT.test(text ?? '');
+}
+
+export async function runAgentTurn(ctx) {
   const toolbelt = buildToolbelt(ctx);
+
+  // Pre-classification fast path: fire the RTS call FIRST,
+  // in parallel with the DB context lookups below — every sequential await
+  // ahead of it (org/pipeline/evidence reads, Slack API round-trips) burns
+  // into the action_token's ~45-135s TTL before the LLM even sees the turn.
+  const wantsEvidence = Boolean(ctx.actionToken && looksEvidenceShaped(ctx.userText));
+  const prefetchPromise = wantsEvidence
+    ? toolbelt.search_workspace({ query: ctx.userText }).catch((e) => {
+        console.warn('[loop] evidence pre-fetch failed, leaving it to the model:', e?.message ?? e);
+        return null;
+      })
+    : Promise.resolve(null);
+
+  const [org, pipeline, evidenceCount, prefetch] = await Promise.all([
+    ctx.teamId ? db.getOrg(ctx.teamId) : null,
+    ctx.teamId ? db.listOpportunities(ctx.teamId) : [],
+    ctx.teamId ? db.countEvidence(ctx.teamId) : 0,
+    prefetchPromise,
+  ]);
+
   const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount, contextChannelId: ctx.contextChannelId });
   const messages = [
     { role: 'system', content: system },
@@ -39,6 +69,13 @@ export async function runAgentTurn(ctx) {
   ];
 
   let toolCalls = 0;
+  if (prefetch) {
+    toolCalls++;
+    messages.push({
+      role: 'system',
+      content: `Workspace evidence was already fetched for you immediately on message receipt, to beat the search credential's short TTL — do NOT call search_workspace again unless these results are clearly insufficient for the question. Pre-fetched results (search_mode: ${prefetch.search_mode}, count: ${prefetch.count}):\n${safeJson(prefetch, 8000)}`,
+    });
+  }
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await withRetry(() =>

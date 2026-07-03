@@ -2,6 +2,7 @@ import { searchWorkspace, detectSearchMode, expandKeywordQuery } from './rts.js'
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { db } from '../services/db.js';
 import { createDraftCanvas } from '../services/canvas.js';
+import { syncOpportunityToList } from '../services/lists.js';
 import { grantCard, evidenceCard, draftReadyBlocks } from '../surfaces/blocks.js';
 
 export const TOOL_SCHEMAS = [
@@ -133,10 +134,13 @@ export function buildToolbelt(ctx) {
       if (action === 'add') {
         if (!opp?.opp_id || !opp?.title) return { error: 'add requires opp.opp_id and opp.title' };
         await db.addOpportunity(teamId, { ...opp, added_by: userId });
+        syncOpportunityToList(client, teamId, { ...opp, stage: 'reviewing' }).catch(() => {});
         return { ok: true, added: opp.title, stage: 'reviewing' };
       }
       if (action === 'move') {
         await db.moveOpportunity(teamId, opp_id, stage);
+        const moved = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id));
+        if (moved) syncOpportunityToList(client, teamId, moved).catch(() => {});
         return { ok: true, opp_id, stage };
       }
       return { error: `unknown action ${action}` };

@@ -1,15 +1,19 @@
 CREATE TABLE IF NOT EXISTS orgs (
-  team_id        TEXT PRIMARY KEY,
-  org_name       TEXT,
-  mission        TEXT,
-  focus_areas    TEXT[] DEFAULT '{}',
-  state          TEXT,
-  org_size       TEXT,
-  digest_channel TEXT,
-  digest_cron    TEXT DEFAULT '0 9 * * 1',
-  evidence_emoji TEXT DEFAULT 'thread',
-  created_at     TIMESTAMPTZ DEFAULT now()
+  team_id          TEXT PRIMARY KEY,
+  org_name         TEXT,
+  mission          TEXT,
+  focus_areas      TEXT[] DEFAULT '{}',
+  state            TEXT,
+  org_size         TEXT,
+  digest_channel   TEXT,
+  digest_cron      TEXT DEFAULT '0 9 * * 1',
+  evidence_emoji   TEXT DEFAULT 'thread',
+  pipeline_list_id      TEXT,
+  pipeline_list_columns JSONB,
+  created_at            TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS pipeline_list_id TEXT;
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS pipeline_list_columns JSONB;
 
 CREATE TABLE IF NOT EXISTS opportunities (
   id             BIGSERIAL PRIMARY KEY,
@@ -25,12 +29,14 @@ CREATE TABLE IF NOT EXISTS opportunities (
   stage          TEXT DEFAULT 'suggested'
                  CHECK (stage IN ('suggested','reviewing','drafting','submitted','awarded','declined')),
   canvas_id      TEXT,
+  list_item_id   TEXT,
   match_score    REAL,
   added_by       TEXT,
   created_at     TIMESTAMPTZ DEFAULT now(),
   updated_at     TIMESTAMPTZ DEFAULT now(),
   UNIQUE (team_id, opp_id)
 );
+ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS list_item_id TEXT;
 
 -- POINTERS ONLY. If you are adding a column that could hold Slack message
 -- content, STOP: you are breaking the product's core compliance promise.

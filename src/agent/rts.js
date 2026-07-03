@@ -42,7 +42,7 @@ export function expandKeywordQuery(query) {
   return [...groups].join(' OR ') || query;
 }
 
-/** Maps the real assistant.search.context response shape (12 §5) into our card shape. */
+/** Maps the real assistant.search.context response shape into our card shape. */
 export function normalizeRtsResult(res) {
   const messages = res?.results?.messages ?? [];
   const files = res?.results?.files ?? [];
@@ -84,9 +84,12 @@ export async function searchWorkspace(client, {
     ...(contextChannelId ? { context_channel_id: contextChannelId } : {}),
   };
   let res;
+  const callStart = Date.now();
   try {
     res = await client.apiCall('assistant.search.context', params);
+    console.log(`[diag] search.context ok in ${Date.now() - callStart}ms`);
   } catch (e) {
+    console.log(`[diag] search.context threw after ${Date.now() - callStart}ms`);
     const err = e?.data?.error ?? e?.message;
     console.error('[rts] search.context failed:', err);
     throw new Error(`Workspace search unavailable (${err}). Tell the user you couldn't search just now and offer to retry.`);

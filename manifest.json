@@ -84,7 +84,8 @@
         "search:read.files",
         "search:read.users",
         "links:read",
-        "team:read"
+        "team:read",
+        "lists:write"
       ]
     },
     "pkce_enabled": false
