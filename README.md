@@ -18,6 +18,32 @@ people who did the work and forgotten within a week. Grantweaver puts it back
 to work.
 
 <!-- demo GIF goes here before submission -->
+<!-- demo video: [3-minute walkthrough](YOUTUBE_URL) -->
+
+## What that means for one organization
+
+A small nonprofit with no grant writer spends close to 284 staff-hours a year
+on grant work. Most of it is not writing. It's browsing funding databases,
+scrolling channels to reconstruct evidence, and scrambling before deadlines.
+Grantweaver returns about 236 of those hours, six staff-weeks, every year:
+
+<p align="left">
+  <img src="assets/impact-hours.png" alt="Staff hours per year on grant work, by hand versus with Grantweaver" width="760" />
+</p>
+
+Hours convert to funding, because capacity is what caps small-org
+applications, not ambition. Two more applications a year at the sector's
+typical 20% success rate and a $25K average award changes the trajectory:
+
+<p align="left">
+  <img src="assets/impact-funding.png" alt="Expected grant revenue per year with and without Grantweaver" width="760" />
+</p>
+
+Both charts are illustrative projections from a stated model, not
+measurements. The same counters run live in the app: the App Home Impact
+Meter tracks opportunities surfaced, dollars applied for, evidence items
+woven, and estimated hours saved, and it discloses its heuristic in a
+tooltip. Our impact claims and the product's telemetry are the same numbers.
 
 ## The three challenge technologies, and where they live
 
@@ -26,6 +52,43 @@ to work.
 | Slack AI capabilities | The agent surface: streaming replies, statuses, suggested prompts, feedback buttons | `src/assistant.js`, `src/agent/loop.js` |
 | Real-Time Search API | The evidence engine: live, permission-aware workspace search with citations back to source messages | `src/agent/rts.js`, `src/agent/tools.js` |
 | MCP | Both directions: `grantsgov-mcp` (a Grants.gov server we built and consume) and `grantweaver-mcp` (exposes the grant pipeline to Claude, Cursor, Agentforce, or any MCP client) | `src/mcp/` |
+
+A note on timing: scraping workspace history into an external database was
+never safe, and it violates Marketplace policy. The Real-Time Search API
+(February 2026) made permission-aware, zero-retention workspace search
+possible for the first time. Grantweaver is a grant tool that could not have
+been built five months ago.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  subgraph SLACK["Slack Workspace"]
+    A[Assistant panel<br/>streaming · prompts · statuses]
+    H[App Home<br/>pipeline board + Impact Meter]
+    C[Canvases<br/>cited drafts]
+    R[🧵 reactions<br/>evidence capture]
+  end
+  subgraph APP["Grantweaver (Node · Bolt JS)"]
+    AG[Agent core<br/>LLM tool loop]
+    TB[Toolbelt]
+    DB[(Postgres<br/>pointers & metadata only)]
+  end
+  subgraph MCP["MCP layer"]
+    GG[grantsgov-mcp<br/>server we built]
+    GW[grantweaver-mcp<br/>server we expose]
+  end
+  A -- events --> AG
+  AG -- "sayStream · Block Kit" --> A
+  AG --> TB
+  TB -- "assistant.search.context<br/>(RTS · zero retention)" --> SLACK
+  TB -- MCP client --> GG --> GOV[api.grants.gov]
+  TB --> DB
+  TB -- canvases.create --> C
+  H --- DB
+  R --> DB
+  EXT[Claude / Cursor / Agentforce] -- MCP --> GW --- DB
+```
 
 ## Quickstart
 
