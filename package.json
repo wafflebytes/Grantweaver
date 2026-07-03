@@ -1,0 +1,31 @@
+{
+  "name": "grantweaver",
+  "version": "0.1.0",
+  "description": "Turn your nonprofit's conversations into funding — a Slack agent for the full grant lifecycle.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node --watch --env-file=.env src/app.js",
+    "start": "node src/app.js",
+    "mcp:grantsgov": "node --env-file=.env src/mcp/grantsgov-server.mjs",
+    "mcp:grantweaver": "node --env-file=.env src/mcp/grantweaver-server.mjs",
+    "migrate": "node --env-file=.env scripts/migrate.mjs",
+    "seed": "node --env-file=.env scripts/seed-demo.mjs",
+    "try:grants": "node scripts/try-grants.mjs",
+    "llm:bakeoff": "node --env-file=.env scripts/llm-bakeoff.mjs",
+    "smoke": "node --env-file=.env scripts/smoke.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.2.0",
+    "@slack/web-api": "^7.8.0",
+    "openai": "^4.104.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "pg": "^8.12.0",
+    "node-cron": "^3.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": { "vitest": "^2.1.0" }
+}

@@ -1,0 +1,70 @@
+{
+  "display_information": {
+    "name": "Grantweaver",
+    "description": "Turn your nonprofit's conversations into funding.",
+    "background_color": "#1B4332",
+    "long_description": "Grantweaver is an AI grants agent for nonprofits. It discovers matched funding opportunities from Grants.gov, gathers impact evidence from your workspace in real time using Slack's Real-Time Search API (never storing your data), drafts cited proposals into Canvases, and keeps your whole grant pipeline on track — all inside Slack. Grantweaver stores permalinks, never message content; every fact in every draft links back to its source. AI-assisted drafts always ask for human review."
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": { "display_name": "Grantweaver", "always_online": true },
+    "assistant_view": {
+      "assistant_description": "Finds grants, gathers cited impact evidence from your workspace, and drafts proposals into Canvases.",
+      "suggested_prompts": []
+    },
+    "slash_commands": [
+      {
+        "command": "/grantweaver",
+        "description": "Grantweaver help, setup, and digest",
+        "usage_hint": "help | setup | digest",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "redirect_urls": ["https://grantweaver.up.railway.app/slack/oauth_redirect"],
+    "scopes": {
+      "bot": [
+        "assistant:write",
+        "chat:write",
+        "chat:write.public",
+        "im:history",
+        "channels:history",
+        "channels:read",
+        "reactions:read",
+        "users:read",
+        "commands",
+        "canvases:write",
+        "canvases:read",
+        "search:read.public",
+        "search:read.files",
+        "search:read.users",
+        "links:read",
+        "team:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://grantweaver.up.railway.app/slack/events",
+      "bot_events": [
+        "assistant_thread_started",
+        "assistant_thread_context_changed",
+        "message.im",
+        "app_home_opened",
+        "reaction_added"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://grantweaver.up.railway.app/slack/events"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}
