@@ -16,8 +16,15 @@ export async function createDraftCanvas(client, { title, markdown, channelId, us
     ...(isChannel ? { channel_ids: [channelId] } : { user_ids: [userId] }),
   }).catch((e) => console.warn('[canvas:access]', e?.data?.error ?? e.message));
 
-  const team = await client.team.info();
-  const canvasUrl = `https://app.slack.com/docs/${team.team.id}/${canvasId}`;
+  // Mirror Slack's own permalink shape — the app.slack.com variant lands some
+  // clients on the file-references view instead of the document itself. On
+  // Enterprise Grid the canonical host is {enterprise_domain}.enterprise.slack.com;
+  // elsewhere it's {domain}.slack.com.
+  const { team } = await client.team.info();
+  const host = team.enterprise_domain
+    ? `${team.enterprise_domain}.enterprise.slack.com`
+    : `${team.domain}.slack.com`;
+  const canvasUrl = `https://${host}/docs/${team.id}/${canvasId}`;
   return { canvasId, canvasUrl };
 }
 

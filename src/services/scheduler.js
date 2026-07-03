@@ -32,7 +32,7 @@ export function startScheduler(app) {
   console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) armed');
 }
 
-/** Exported for tests & manual runs (smoke step 8, T4.1). */
+/** Exported for tests & manual runs. */
 export async function runDeadlineSweepOnce(client) {
   for (const org of await db.allOrgs()) {
     if (!org.digest_channel) continue;

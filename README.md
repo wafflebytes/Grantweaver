@@ -105,6 +105,22 @@ The LLM client is provider-agnostic (any OpenAI-compatible endpoint). Pick a
 model with `npm run llm:bakeoff`, which tests tool-calling correctness and
 latency against a replica of the real agent turn.
 
+### Connect your own MCP client
+
+Grantweaver exposes its pipeline as an MCP server (`grantweaver-mcp`), so
+Claude, Cursor, or any other MCP client can ask about your grants:
+
+```bash
+node --env-file=.env src/mcp/grantweaver-server.mjs   # serves :7802/mcp
+
+claude mcp add --transport http grantweaver http://localhost:7802/mcp \
+  --header "Authorization: Bearer $MCP_SHARED_SECRET"
+```
+
+Then ask: *"What's due in the next two weeks for team T…?"* — four read-only
+tools are available: `list_pipeline`, `get_deadlines`, `search_grants`, and
+`get_impact_meter`. Requests without the bearer secret get a 401.
+
 ## Privacy by architecture
 
 Grantweaver never stores message content. The evidence locker holds
