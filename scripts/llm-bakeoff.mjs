@@ -1,4 +1,4 @@
-// LLM bake-off (docs/03 §2b): validates candidate models against a replica of
+// LLM bake-off: validates candidate models against a replica of
 // Grantweaver's real agent turn. Gate = correct OpenAI-format tool calling with
 // valid JSON args; rank = latency; quality = grounded multi-step synthesis.
 //

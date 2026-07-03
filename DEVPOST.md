@@ -137,8 +137,8 @@ once the repo is public.
 slack-bolt, slack-api, node.js, model-context-protocol, postgresql, grants.gov-api, railway
 ```
 
-Plus the LLM provider tag once the bake-off winner is final (per docs/03
-§2b, e.g. `gemini` or `nvidia-nim`).
+Plus the LLM provider tag once the bake-off winner is final (e.g. `gemini`
+or `nvidia-nim`).
 
 ### "Try it out" links
 
@@ -199,7 +199,7 @@ Leave blank. Grantweaver is new for this hackathon.
 
 ### Architecture diagram (required, pdf/png/jpg, 35 MB max)
 
-- Render the Mermaid source in docs/10 §2 at mermaid.live, export PNG at 2x.
+- Render the architecture Mermaid diagram at mermaid.live, export PNG at 2x.
 - Badge the three required technologies visually: Slack AI surface, RTS API,
   MCP (both servers). Judges should get the whole story from this one image.
 - Sanity check that every box in the diagram matches a file that actually
@@ -210,8 +210,8 @@ Leave blank. Grantweaver is new for this hackathon.
 ## Submit checklist (the last page)
 
 - [ ] Video: public YouTube, under 3:00, burned-in captions, no copyrighted
-      music, no real-person data. Script in docs/10 §1.
-- [ ] Gallery: 5 or 6 images at 1600×1000 (list in docs/10 §4), hero first.
+      music, no real-person data.
+- [ ] Gallery: 5 or 6 images at 1600×1000, hero first.
 - [ ] Repo public, README standing alone (no references to planning docs).
 - [ ] Sandbox access confirmed for both judge accounts.
 - [ ] Run the final story text through a fresh read-aloud pass. If a sentence

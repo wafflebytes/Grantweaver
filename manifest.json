@@ -12,8 +12,8 @@
       "messages_tab_read_only_enabled": false
     },
     "bot_user": { "display_name": "Grantweaver", "always_online": true },
-    "assistant_view": {
-      "assistant_description": "Finds grants, gathers cited impact evidence from your workspace, and drafts proposals into Canvases.",
+    "agent_view": {
+      "agent_description": "Finds grants, gathers cited impact evidence from your workspace, and drafts proposals into Canvases.",
       "suggested_prompts": []
     },
     "slash_commands": [
@@ -52,8 +52,6 @@
     "event_subscriptions": {
       "request_url": "https://grantweaver.up.railway.app/slack/events",
       "bot_events": [
-        "assistant_thread_started",
-        "assistant_thread_context_changed",
         "message.im",
         "app_home_opened",
         "reaction_added"

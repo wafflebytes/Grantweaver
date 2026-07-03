@@ -27,6 +27,15 @@ async function post(path, body) {
 
 function text(obj) { return { content: [{ type: 'text', text: JSON.stringify(obj) }] }; }
 
+// Grants.gov returns award amounts as numbers, numeric strings, or the
+// literal string "none" — normalize to number | null so consumers never
+// see "$NaN" or feed "none" into a NUMERIC column.
+function money(v) {
+  if (v == null || v === '' || String(v).toLowerCase() === 'none') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function buildServer() {
   const server = new McpServer({ name: 'grantsgov-mcp', version: '0.1.0' });
 
@@ -39,12 +48,14 @@ export function buildServer() {
       rows: z.number().int().min(1).max(25).default(10),
       fundingCategories: z.string().optional().describe('Comma-separated category codes: ED education, HL health, EN environment, CD community development, IS income security'),
       agencies: z.string().optional().describe('Comma-separated agency codes, e.g. "HHS,ED"'),
+      eligibilities: z.string().optional().describe('Comma-separated applicant-eligibility codes; "12" = 501(c)(3) nonprofits'),
     },
-    async ({ keyword, oppStatuses, rows, fundingCategories, agencies }) => {
+    async ({ keyword, oppStatuses, rows, fundingCategories, agencies, eligibilities }) => {
       const data = await post('/search2', {
         keyword, oppStatuses, rows, startRecordNum: 0,
         ...(fundingCategories ? { fundingCategories } : {}),
         ...(agencies ? { agencies } : {}),
+        ...(eligibilities ? { eligibilities } : {}),
       });
       const hits = (data?.data?.oppHits ?? []).map((h) => ({
         opp_id: String(h.id),
@@ -74,8 +85,8 @@ export function buildServer() {
         title: s.opportunityTitle,
         agency: syn.agencyName,
         synopsis: String(syn.synopsisDesc ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000),
-        award_ceiling: syn.awardCeiling,
-        award_floor: syn.awardFloor,
+        award_ceiling: money(syn.awardCeiling),
+        award_floor: money(syn.awardFloor),
         close_date: syn.responseDate,
         eligibility: String(syn.applicantEligibilityDesc ?? '').slice(0, 1500),
         contact: syn.agencyContactEmail,
