@@ -40,12 +40,16 @@ const offsetDate = (d) => new Date(Date.now() + d * DAYS).toISOString().slice(0,
 // served from the app's own static site (site/avatars/*.jpg) read far
 // better in a live demo than an emoji shortcode ever did.
 const APP_BASE_URL = process.env.APP_BASE_URL?.replace(/\/$/, '');
+// ui-avatars.com generates a deterministic initials avatar from a URL —
+// no local asset needed, and it fills the gap for personas that never got a
+// real photo (only maya.jpg/dre.jpg exist under site/avatars).
+const initialsAvatar = (name, bg) => `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=${bg}&color=fff&size=192`;
 const PERSONAS = {
   maya: { name: 'Maya Okafor', icon_url: APP_BASE_URL ? `${APP_BASE_URL}/avatars/maya.jpg` : undefined },
   dre: { name: 'Dre Sullivan', icon_url: APP_BASE_URL ? `${APP_BASE_URL}/avatars/dre.jpg` : undefined },
-  priya: { name: 'Priya Raman' },
-  sam: { name: 'Sam Whitfield' },
-  jo: { name: 'Jo Martinez' },
+  priya: { name: 'Priya Raman', icon_url: initialsAvatar('Priya Raman', '8e44ad') },
+  sam: { name: 'Sam Whitfield', icon_url: initialsAvatar('Sam Whitfield', 'd35400') },
+  jo: { name: 'Jo Martinez', icon_url: initialsAvatar('Jo Martinez', '16a085') },
 };
 
 // Channel → { watched, post } per docs 26 §2.
