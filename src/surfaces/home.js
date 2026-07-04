@@ -1,5 +1,6 @@
 import { db } from '../services/db.js';
 import { orgLinkUrl } from '../services/weblink.js';
+import { listLink } from '../services/lists.js';
 
 const STAGES = [
   ['suggested', '🌱 Suggested'], ['reviewing', '🔍 Reviewing'], ['drafting', '✍️ Drafting'],
@@ -55,6 +56,9 @@ export async function publishHome(client, teamId, userId) {
         accessibility_label: 'Open the Grantweaver agent panel' },
       { type: 'button', url: orgLinkUrl(teamId), text: { type: 'plain_text', text: '📄 Evidence index' },
         accessibility_label: 'Open the web evidence index' },
+      ...(org?.pipeline_list_id ? [{ type: 'button', url: await listLink(client, teamId, org.pipeline_list_id),
+        text: { type: 'plain_text', text: '📋 Pipeline list' },
+        accessibility_label: 'Open the pipeline Slack List' }] : []),
     ]},
     { type: 'section', text: { type: 'mrkdwn',
       text: `*This quarter:* ${meter.surfaced} opportunities surfaced · $${meter.applied.toLocaleString()} applied for · ${meter.evidence} evidence items woven · est. *${meter.hoursSaved} hrs saved*` } },

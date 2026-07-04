@@ -136,6 +136,21 @@ async function canvasLinkFor(client, canvasId) {
   }
 }
 
+// The pipeline List gets created and kept in sync via slackLists.* API
+// calls, but that API never puts a link to it anywhere a human would see
+// it — live-reported: the List is real and populated (confirmed via
+// slackLists.items.list) but effectively invisible in the actual client,
+// since nothing ever shared it to a channel or linked it from the Home tab.
+export async function listLink(client, teamId, listId) {
+  try {
+    const { team } = await client.team.info();
+    const host = team.enterprise_domain ? `${team.enterprise_domain}.enterprise.slack.com` : `${team.domain}.slack.com`;
+    return `https://${host}/lists/${teamId}/${listId}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function omitColumnId({ column_id, ...rest }) {
   return rest;
 }

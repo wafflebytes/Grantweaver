@@ -712,13 +712,25 @@ async function seedState(pool, teamId) {
 
   const opps = await resolveRealOpps();
   const stages = ['suggested', 'reviewing', 'drafting', 'submitted'];
-  const owners = { drafting: 'dre', reviewing: 'jo' };
+  // Live-caught bug: this used to store the literal persona handle
+  // ('dre', 'jo') as owner_user_id — not a real Slack user ID — which
+  // silently broke List sync (owner is a `user` column type; Slack's API
+  // rejects anything not matching a real user ID with invalid_arguments).
+  // Resolve the real ID via the persona's own token, falling back to null
+  // (unassigned) if that persona has no token in this environment.
+  const ownerHandles = { drafting: 'dre', reviewing: 'jo' };
+  const owners = {};
+  for (const [stage, handle] of Object.entries(ownerHandles)) {
+    const client = clientFor(handle);
+    owners[stage] = client ? (await client.auth.test().catch(() => null))?.user_id ?? null : null;
+  }
   for (let i = 0; i < stages.length; i++) {
     const o = opps[i], stage = stages[i];
     await pool.query(
       `INSERT INTO opportunities (team_id, opp_id, opp_number, title, agency, close_date, award_ceiling, url, stage, match_score, owner_user_id, last_activity_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now() - ($12 || ' days')::interval)
-       ON CONFLICT (team_id, opp_id) DO UPDATE SET stage=EXCLUDED.stage, updated_at=now()`,
+       ON CONFLICT (team_id, opp_id) DO UPDATE SET stage=EXCLUDED.stage, title=EXCLUDED.title,
+         agency=EXCLUDED.agency, owner_user_id=EXCLUDED.owner_user_id, updated_at=now()`,
       [teamId, String(o.opp_id), o.opp_number ?? null, o.title, o.agency ?? null,
        o.details?.close_date ?? offsetDate(45), o.details?.award_ceiling ?? null,
        `https://grants.gov/search-results-detail/${o.opp_id}`, stage, 0.8,
