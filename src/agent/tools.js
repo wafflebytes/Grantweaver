@@ -381,7 +381,7 @@ export function buildToolbelt(ctx) {
 // have gone through that cleaning), so a raw "&nbsp;"-laden Grants.gov
 // title could reach the DB and then the Home tab verbatim (live-reported).
 // Clean defensively here regardless of source.
-function sanitizeText(v) {
+export function sanitizeText(v) {
   if (v == null) return v;
   return String(v)
     .replace(/<[^>]+>/g, ' ')

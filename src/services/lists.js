@@ -152,7 +152,11 @@ const EVIDENCE_COLUMN_DEFS = [
   { key: 'summary', name: 'Evidence', type: 'text', is_primary_column: true },
   {
     key: 'tag', name: 'Type', type: 'select',
-    options: { choices: ['metric', 'story', 'testimonial'].map((t) => ({ value: t, label: t[0].toUpperCase() + t.slice(1) })) },
+    options: { choices: [
+      { value: 'metric', label: 'Metric', color: 'blue' },
+      { value: 'story', label: 'Story', color: 'green' },
+      { value: 'testimonial', label: 'Testimonial', color: 'orange' },
+    ] },
   },
   { key: 'channel', name: 'Channel', type: 'text' },
   { key: 'saved_at', name: 'Saved', type: 'date' },
