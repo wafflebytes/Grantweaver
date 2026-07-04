@@ -155,12 +155,30 @@ export function buildToolbelt(ctx) {
       const rawResults = await searchWorkspace(client, {
         query: q, contentTypes: content_types === 'both' ? ['messages', 'files'] : content_types, actionToken, contextChannelId,
       });
+      // Onboarding lets the org pick which channels feed evidence
+      // (watched_channels/post_channels) — but until now that scope was
+      // only ever enforced for the onboarding SCAN (scan.js), never for
+      // this live tool. assistant.search.context returns every public
+      // channel the app can see with no app-level restriction, so a
+      // channel the org never opted in (an old archived reseed channel, a
+      // channel added after onboarding, in principle even the
+      // budget-finance privacy foil if a query happened to match it) could
+      // still surface here. Enforce the same opt-in scope live. Only
+      // message-type hits carry a channel_id from RTS today (file hits
+      // don't — a known gap, not silently pretended away) so scoping only
+      // applies to messages; unscoped orgs (no watched_channels set yet,
+      // e.g. pre-onboarding) fall back to unscoped, matching prior behavior.
+      const org = teamId ? await db.getOrg(teamId) : null;
+      const allowedChannels = org ? new Set([...(org.watched_channels ?? []), ...(org.post_channels ?? [])]) : null;
+      const inScope = allowedChannels?.size
+        ? rawResults.filter((r) => !r.channel_id || allowedChannels.has(r.channel_id))
+        : rawResults;
       // Messages that are themselves conversations WITH or FROM the bot
       // (mentions, asks, the bot's own replies) aren't evidence — a channel
       // mention otherwise gets its own question (and the bot's last answer)
       // back as top "hits". Note mentions render as <@ID|name>, so match the
       // prefix, not <@ID>. Transient filter, nothing stored.
-      const notSelfTalk = rawResults.filter((r) =>
+      const notSelfTalk = inScope.filter((r) =>
         r.message_ts !== ctx.messageTs
         && !(ctx.botUserId && (
           r.snippet?.includes(`<@${ctx.botUserId}`)
