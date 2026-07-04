@@ -377,6 +377,12 @@ export const db = {
       'SELECT * FROM evidence_pointers WHERE team_id=$1 ORDER BY saved_at DESC LIMIT $2', [teamId, limit]);
     return rows;
   },
+  async getEvidencePointer(teamId, channelId, messageTs) {
+    const { rows } = await pool.query(
+      'SELECT * FROM evidence_pointers WHERE team_id=$1 AND channel_id=$2 AND message_ts=$3',
+      [teamId, channelId, messageTs]);
+    return rows[0] ?? null;
+  },
   async countEvidence(teamId) {
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM evidence_pointers WHERE team_id=$1', [teamId]);

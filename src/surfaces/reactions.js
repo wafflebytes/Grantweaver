@@ -79,17 +79,34 @@ export function registerReactions(app) {
     } catch (e) { console.error('[reaction_added]', e?.message ?? e); }
   });
 
-  app.action(/^evidence_tag:/, async ({ ack, action, body }) => {
+  app.action(/^evidence_tag:/, async ({ ack, action, body, client }) => {
     await ack();
     const { channel, ts, tag } = JSON.parse(action.value);
-    await db.saveEvidence(body.team.id, { channel_id: channel, message_ts: ts, tag, saved_by: body.user.id });
+    const teamId = body.team.id;
+    const { listItemId } = await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, tag, saved_by: body.user.id });
+    // Live gap found in review: a retag never touched the List row, so its
+    // Type column silently went stale the moment someone re-tagged.
+    const channelInfo = await client.conversations.info({ channel }).catch(() => null);
+    syncEvidenceToList(client, teamId, {
+      channel_id: channel, message_ts: ts, tag, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+    }).catch(() => {});
   });
 
-  app.action('evidence_undo', async ({ ack, action, body }) => {
+  app.action('evidence_undo', async ({ ack, action, body, client }) => {
     await ack();
     const { channel, ts } = JSON.parse(action.value);
+    const teamId = body.team.id;
+    // Fetch BEFORE deleting — the List row's id only lives on this DB row.
+    const ptr = await db.getEvidencePointer(teamId, channel, ts);
     await db.pool.query(
       'DELETE FROM evidence_pointers WHERE team_id=$1 AND channel_id=$2 AND message_ts=$3',
-      [body.team.id, channel, ts]);
+      [teamId, channel, ts]);
+    if (ptr?.list_item_id) {
+      const org = await db.getOrg(teamId);
+      if (org?.evidence_list_id) {
+        await client.apiCall('slackLists.items.delete', { list_id: org.evidence_list_id, id: ptr.list_item_id })
+          .catch((e) => console.warn('[lists:evidence:undo]', e?.data?.error ?? e.message));
+      }
+    }
   });
 }
