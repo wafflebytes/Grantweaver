@@ -128,6 +128,19 @@ async function runScanAndReview(client, teamId, channel) {
     channel, text: COPY.review,
     blocks: scanSummaryCard({ index, webUrl: orgLinkUrl(teamId) }),
   });
+  // The scan used to just post the summary and stop — thin coverage got no
+  // reaction at all, even though that's exactly the moment a real
+  // development director would ask a follow-up question. One honest,
+  // specific nudge (not a generic "add more channels") when coverage is
+  // genuinely thin, so the org can fix it before it bites them in a draft.
+  if (summary.totalHits < 3 || summary.channelsCovered < 2) {
+    await client.chat.postMessage({
+      channel,
+      text: "I didn't find much yet — want to point me at more channels?",
+      blocks: [{ type: 'section', text: { type: 'mrkdwn',
+        text: `That's pretty thin evidence to build funder-ready proof from (${summary.totalHits} hit${summary.totalHits === 1 ? '' : 's'} across ${summary.channelsCovered} channel${summary.channelsCovered === 1 ? '' : 's'}). Two common reasons: your team posts outcomes somewhere I'm not watching yet, or the numbers mostly live in files/spreadsheets I haven't been shared. Hit *Adjust* above to add channels, or just tell me here where your team tracks program metrics or stories.` } }],
+    });
+  }
   return summary;
 }
 
