@@ -43,6 +43,15 @@ const sitePage = (file, routePath = `/${file}`) => ({
 export const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
+  // @slack/web-api's WebClient defaults to timeout: 0 — NO timeout at all.
+  // Every chat.postMessage/apiCall/conversations.* call in the whole app
+  // shared this one gap, the same bug class already fixed for the LLM
+  // client and the grantsgov MCP client, just much bigger blast radius:
+  // live-reproduced a "pipeline add" turn that hung 5+ minutes with zero
+  // reply and no error, most likely stuck inside a Slack API call
+  // (slackLists/canvas) rather than the grantsgov or LLM calls that already
+  // had timeouts. 45s covers real Slack API latency with headroom.
+  clientOptions: { timeout: 45_000 },
   // In Socket Mode, Bolt's health-check/customRoutes HTTP server reads its
   // port from the constructor (not from app.start()'s argument) — pass it
   // here so PORT is honored in both modes.
