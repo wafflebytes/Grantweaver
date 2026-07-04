@@ -3,6 +3,7 @@
 // tokens so it reads as the same product. Data is counts+links only — the
 // same no-message-content rule as the evidence_index table itself.
 import { db } from '../services/db.js';
+import { fmtDate } from '../surfaces/cards.js';
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -100,7 +101,7 @@ export async function renderOrgPage(teamId) {
   const pipelineHtml = pipeline.length
     ? pipeline.slice(0, 10).map((o) => `<div class="pipeline-row">
         <span>${esc(o.title)}</span>
-        <span><span class="badge">${esc(o.stage)}</span> ${o.fit_score != null ? `· fit ${o.fit_score}/100` : ''} · ${o.close_date ? esc(String(o.close_date).slice(0, 10)) : 'rolling'}
+        <span><span class="badge">${esc(o.stage)}</span> ${o.fit_score != null ? `· fit ${o.fit_score}/100` : ''} · ${o.close_date ? esc(fmtDate(o.close_date)) : 'rolling'}
         ${o.checklist?.length ? `· ${o.checklist.filter((c) => c.done).length}/${o.checklist.length}` : ''}</span>
       </div>`).join('')
     : `<p class="empty">No pipeline yet.</p>`;
