@@ -11,8 +11,20 @@
 // flags: --wipe (delete+recreate channels this script owns; refuses on
 //        channels it didn't create) --messages-only --state-only --verify
 import { WebClient } from '@slack/web-api';
+import { createReadStream } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { grantsGov } from '../src/mcp/grantsgov-client.js';
+
+const ASSETS_DIR = new URL('../test/fixtures/seed-assets/', import.meta.url);
+const FILE_SLOTS = {
+  A1: ['program-updates_attendance-semester.pdf'],
+  A2: ['events_stem-saturday-1.jpg', 'events_stem-saturday-2.jpg', 'events_stem-saturday-3.jpg'],
+  A3: ['board_q3-board-report.pdf'],
+  A4: ['events_fall-flyer.png'],
+  A5: ['mentor-stories_parent-note.jpg'],
+  A6: ['volunteers_signup-sheet.pdf'],
+};
 
 const bot = new WebClient(process.env.SEED_BOT_TOKEN);
 let userTokens = {};
@@ -43,8 +55,8 @@ const CHANNELS = {
   'budget-finance': { watched: false, post: false }, // privacy foil — never watched
 };
 
-// oldest-first; ⭐/⭐R rows are the verbatim evidence targets (docs/26 §4) —
-// never reword these. `react: true` = a 🧵 pre-reaction (evidence-capture demo).
+// oldest-first; ⭐/⭐R rows are the verbatim evidence targets — never reword
+// these. `react: true` = a 🧵 pre-reaction (evidence-capture demo).
 const PLAN = [
   { ch: 'general', who: 'sam', text: 'Morning! Coffee machine in the back is fixed 🎉' },
   { ch: 'general', who: 'maya', text: 'Reminder: street parking is permit-only on Thursdays now.' },
@@ -89,9 +101,21 @@ async function ensureChannels() {
   const existing = await bot.conversations.list({ types: 'public_channel', limit: 200 });
   for (const name of Object.keys(CHANNELS)) {
     const found = existing.channels.find((c) => c.name === name);
+    const created = !found;
     ids[name] = found?.id ?? (await bot.conversations.create({ name })).channel.id;
-    try { await bot.conversations.join({ channel: ids[name] }); joined.add(name); }
-    catch (e) { console.warn(`[seed] could not join #${name}: ${e?.data?.error ?? e.message}`); }
+    // The bot is auto-joined to channels it creates; for pre-existing
+    // channels, try an explicit join (best-effort — some tokens lack
+    // channels:join, in which case fall back to checking membership).
+    if (created) {
+      joined.add(name);
+    } else {
+      try { await bot.conversations.join({ channel: ids[name] }); joined.add(name); }
+      catch (e) {
+        const info = await bot.conversations.info({ channel: ids[name] }).catch(() => null);
+        if (info?.channel?.is_member) joined.add(name);
+        else console.warn(`[seed] not a member of #${name} and could not join: ${e?.data?.error ?? e.message}`);
+      }
+    }
     // Invite every persona with a real user token so their posts read as
     // themselves, not the app.
     const userIds = [];
@@ -107,9 +131,14 @@ async function ensureChannels() {
 
 async function postPlan(ids, joined) {
   const tsByIndex = [];
+  let posted = 0;
   for (let i = 0; i < PLAN.length; i++) {
     const m = PLAN[i];
-    if (!joined.has(m.ch)) { tsByIndex.push(null); continue; }
+    if (!joined.has(m.ch)) {
+      console.warn(`[seed] skipping message ${i} — not joined to #${m.ch}`);
+      tsByIndex.push(null);
+      continue;
+    }
     const channel = ids[m.ch];
     const persona = PERSONAS[m.who];
     const client = clientFor(m.who);
@@ -124,14 +153,40 @@ async function postPlan(ids, joined) {
       });
     }
     tsByIndex.push(res.ts);
+    posted++;
     if (m.star === 'R') {
       const reactor = clientFor('maya') ?? bot;
       await reactor.reactions.add({ channel, timestamp: res.ts, name: 'thread' }).catch(() => {});
     }
     await new Promise((r) => setTimeout(r, 400));
   }
-  console.log(`Posted ${PLAN.length} messages across ${Object.keys(CHANNELS).length} channels.`);
+  console.log(`Posted ${posted}/${PLAN.length} messages across ${Object.keys(CHANNELS).length} channels.`);
   return tsByIndex;
+}
+
+async function uploadAssets(ids, joined, tsByIndex) {
+  let uploaded = 0;
+  for (let i = 0; i < PLAN.length; i++) {
+    const m = PLAN[i];
+    if (!m.file || !joined.has(m.ch)) continue;
+    const filenames = FILE_SLOTS[m.file];
+    if (!filenames) { console.warn(`[seed] no asset filenames mapped for ${m.file}`); continue; }
+    // Event photos are attributed to jo (she manages the press folder); otherwise the message's own author.
+    const uploader = (m.file === 'A2' ? clientFor('jo') : clientFor(m.who)) ?? bot;
+    const channel_id = ids[m.ch];
+    const thread_ts = tsByIndex[i];
+    for (const filename of filenames) {
+      const filePath = fileURLToPath(new URL(filename, ASSETS_DIR));
+      try {
+        await uploader.files.uploadV2({ channel_id, thread_ts, filename, file: createReadStream(filePath) });
+        uploaded++;
+      } catch (e) {
+        console.warn(`[seed] failed to upload ${filename} for ${m.file}: ${e?.data?.error ?? e.message}`);
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+  console.log(`Uploaded ${uploaded} asset file(s).`);
 }
 
 async function resolveRealOpps() {
@@ -201,7 +256,10 @@ async function main() {
 
   if (!flags.has('--state-only')) {
     const { ids, joined } = await ensureChannels();
-    if (!flags.has('--verify')) await postPlan(ids, joined);
+    if (!flags.has('--verify')) {
+      const tsByIndex = await postPlan(ids, joined);
+      await uploadAssets(ids, joined, tsByIndex);
+    }
   }
   if (!flags.has('--messages-only')) await seedState(pool, teamId);
   if (flags.has('--verify')) await verify(pool, teamId);

@@ -4,7 +4,9 @@
   "description": "Turn your nonprofit's conversations into funding — a Slack agent for the full grant lifecycle.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node --watch --env-file=.env src/app.js",
     "start": "node src/app.js",
@@ -20,13 +22,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
     "@slack/bolt": "^4.2.0",
     "@slack/web-api": "^7.8.0",
-    "openai": "^4.104.0",
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "pg": "^8.12.0",
     "node-cron": "^3.0.3",
+    "openai": "^4.104.0",
+    "pg": "^8.12.0",
     "zod": "^3.23.8"
   },
-  "devDependencies": { "vitest": "^2.1.0" }
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
 }
