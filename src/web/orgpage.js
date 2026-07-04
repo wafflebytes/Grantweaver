@@ -17,7 +17,12 @@ function themeRows(index) {
   for (const row of index) {
     if (!byTheme.has(row.theme)) byTheme.set(row.theme, { theme: row.theme, channels: [], strength: row.strength, hits: 0, hasFiles: false, permalinks: [] });
     const t = byTheme.get(row.theme);
-    t.channels.push(row.channel_name ? `#${row.channel_name}` : row.channel_id ? `#${row.channel_id}` : '📎 file (no channel)');
+    // Stale rows from before the evidence-index #unknown fix can still carry
+    // the literal string "unknown" as channel_id (an old fallback value,
+    // never a real Slack ID) — treat it the same as missing rather than
+    // rendering it as a fake channel tag.
+    const cid = row.channel_id && row.channel_id !== 'unknown' ? row.channel_id : null;
+    t.channels.push(row.channel_name ? `#${row.channel_name}` : cid ? `#${cid}` : '📎 file');
     t.hits += row.hits ?? 0;
     t.hasFiles = t.hasFiles || row.has_files;
     t.permalinks.push(...(row.permalinks ?? []));
@@ -63,13 +68,20 @@ header.top .meta{color:var(--on-green);opacity:.85;font-size:.9rem}
 .meter b{display:block;font-family:var(--display);font-size:1.3rem;color:var(--on-green)}
 .card{background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;margin-top:24px}
 .chip{display:inline-block;font-size:.78rem;background:rgba(212,160,23,.14);color:var(--gold);border-radius:999px;padding:3px 10px;margin:2px 4px 2px 0}
-.theme-row{padding:14px 0;border-bottom:1px solid rgba(27,67,50,.08)}
+.theme-row{padding:16px 0;border-bottom:1px solid rgba(27,67,50,.08)}
 .theme-row:last-child{border-bottom:none}
 .theme-row .label{font-weight:600;font-family:var(--display)}
-.bar{height:8px;background:rgba(27,67,50,.08);border-radius:4px;overflow:hidden;margin:8px 0}
+.bar{height:8px;background:rgba(27,67,50,.08);border-radius:4px;overflow:hidden;margin:10px 0 8px}
 .bar > div{height:100%;background:linear-gradient(90deg,var(--gold-soft),var(--gold))}
-.channels a{color:var(--muted);text-decoration:none;font-size:.85rem;margin-right:10px}
-.pipeline-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid rgba(27,67,50,.06);font-size:.92rem}
+.channels{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--muted);font-size:.85rem}
+.channels a{color:var(--muted);text-decoration:underline;text-decoration-color:rgba(92,107,98,.35)}
+.hits-badge{background:rgba(212,160,23,.14);color:var(--gold);border-radius:999px;padding:2px 10px;font-size:.78rem;font-weight:600}
+@media (prefers-color-scheme:dark){.hits-badge{color:var(--gold-soft)}}
+.pipeline-card{display:flex;justify-content:space-between;align-items:center}
+.pipeline-card h2{margin:0}
+.pipeline-link{color:var(--gold);font-size:1.7rem;line-height:1;text-decoration:none;display:inline-block}
+.pipeline-link:hover{color:var(--gold-soft)}
+@media (prefers-color-scheme:dark){.pipeline-link{color:var(--gold-soft)}}
 .badge{font-size:.72rem;padding:2px 8px;border-radius:999px;background:rgba(45,106,79,.12)}
 footer{margin-top:32px;font-size:.82rem;color:var(--muted);text-align:center}
 footer a{color:var(--muted)}
@@ -93,11 +105,15 @@ export async function renderOrgPage(teamId, client) {
   const themeHtml = themes.length
     ? themes.map((t) => {
         const pct = Math.max(6, Math.min(100, t.hits * 12));
+        const uniqueChannels = [...new Set(t.channels)];
         return `<div class="theme-row">
           <div class="label">${STRENGTH_ICON[t.strength]} ${esc(t.theme)}${t.hasFiles ? ' 📎' : ''}</div>
           <div class="bar"><div style="width:${pct}%"></div></div>
-          <div class="channels">${t.channels.map((c) => `<span>${esc(c)}</span>`).join(' · ')} — ${t.hits} hit${t.hits === 1 ? '' : 's'}
-          ${t.permalinks.slice(0, 3).map((p) => `· <a href="${esc(p)}" target="_blank" rel="noopener">view in Slack</a>`).join(' ')}</div>
+          <div class="channels">
+            ${uniqueChannels.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}
+            <span class="hits-badge">${t.hits} hit${t.hits === 1 ? '' : 's'}</span>
+            ${t.permalinks.slice(0, 3).map((p) => `<a href="${esc(p)}" target="_blank" rel="noopener">view in Slack</a>`).join('')}
+          </div>
         </div>`;
       }).join('')
     : `<p class="empty">No index yet — ask Grantweaver to scan your workspace.</p>`;
@@ -132,10 +148,10 @@ export async function renderOrgPage(teamId, client) {
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:6px">⭐ strong · ● solid · ○ worth building. Bar length tracks how many times each theme turned up.</p>
     ${themeHtml}
   </div>
-  <div class="card" style="display:flex;justify-content:space-between;align-items:center">
-    <h2 style="margin:0">Pipeline</h2>
+  <div class="card pipeline-card">
+    <h2>Pipeline</h2>
     ${listUrl
-      ? `<a href="${esc(listUrl)}" target="_blank" rel="noopener">Pipeline ↗</a>`
+      ? `<a class="pipeline-link" href="${esc(listUrl)}" target="_blank" rel="noopener" aria-label="Open the pipeline Slack List" title="Open the pipeline Slack List">↗</a>`
       : `<span class="empty">List not created yet — ask Grantweaver to add an opportunity first.</span>`}
   </div>
   <footer>
