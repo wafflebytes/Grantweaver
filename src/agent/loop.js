@@ -60,7 +60,11 @@ const EVIDENCE_LOOKBACK = /\bevidence (list|locker)\b|\b(list|show|see) (me |the
 // under the hood — an evidence prefetch ahead of it burns the turn's one-shot
 // action_token before the real tool ever gets to run, so every one of its
 // searches then fails with invalid_action_token and the turn hangs.
-const RESCAN_INTENT = /\b(rescan|rebuild|refresh)\b.{0,20}\b(workspace|index)\b|\b(workspace|evidence) (index|scan)\b/i;
+// Covers BOTH verb-object orders — "rescan the workspace" AND "scan my
+// workspace" (verb-first phrasing, live-caught missing here: the exact text
+// onboarding's own prompt suggests typing slipped through as a false
+// negative and re-triggered the archived-channel prefetch bug).
+const RESCAN_INTENT = /\b(re)?scan\b.{0,20}\b(workspace|index)\b|\b(rebuild|refresh)\b.{0,20}\b(workspace|index)\b|\b(workspace|evidence) (index|scan)\b/i;
 
 export function looksEvidenceShaped(text) {
   const t = text ?? '';
