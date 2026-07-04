@@ -30,7 +30,7 @@ export function registerReactions(app) {
     try {
       const teamId = context.teamId;
 
-      // ✅-reaction confirm (docs/23 §5): a ✅ on a pending confirm card is
+      // ✅-reaction confirm: a ✅ on a pending confirm card is
       // the same claim path as clicking its button. Checked BEFORE the
       // evidence-emoji logic below since it targets a different item kind.
       if (event.reaction === 'white_check_mark' && event.item?.type === 'message') {

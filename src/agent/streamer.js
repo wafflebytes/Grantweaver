@@ -1,6 +1,6 @@
 // Both streamers expose { append, stop, task } — runAgentTurn stays
 // surface-blind. task() is progress texture: real task_update chunks in
-// threads (docs/12 §5 — live-verified shape, flat not nested), a plain
+// threads (live-verified shape — flat, not nested), a plain
 // italic line in the DM (agent_view sayStream has no task-chunk concept).
 let taskSeq = 0;
 
@@ -30,11 +30,16 @@ export function makeThreadStreamer({ client, channel, thread_ts, userId, teamId 
   return {
     async append({ markdown_text }) {
       const { ts } = await ensure();
-      await client.apiCall('chat.appendStream', { channel, ts, markdown_text });
+      // Once the stream carries task_update chunks, plain markdown must ALSO
+      // arrive as a chunk — mixing the top-level markdown_text param with
+      // chunk appends on one stream fails live with streaming_mode_mismatch.
+      await client.apiCall('chat.appendStream', {
+        channel, ts, chunks: [{ type: 'markdown_text', text: markdown_text }],
+      });
     },
     async task(label, status = 'in_progress', id = `t${taskSeq++}`) {
       const { ts } = await ensure();
-      // Live-verified shape (docs/12 §5): task_update chunks are flat, not
+      // Live-verified shape: task_update chunks are flat, not
       // nested — id/title/status live at the top level of the chunk object.
       // Passing the same id back updates that task's status line instead of
       // adding a new one. Best-effort: task texture must never fail a turn.

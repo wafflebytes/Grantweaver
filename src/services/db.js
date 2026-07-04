@@ -125,7 +125,7 @@ export const db = {
       [teamId, JSON.stringify(facts ?? {})]);
   },
   async resetOrg(teamId) {
-    // Order per docs/25 §3: tables with no FK on `orgs` first (they must
+    // Order matters: tables with no FK on `orgs` first (they must
     // survive even if the org row is somehow already gone), then the org row
     // itself — its ON DELETE CASCADE takes opportunities/watches/evidence_index.
     // `feedback` deliberately survives (product telemetry, not org state).
@@ -206,7 +206,7 @@ export const db = {
     await pool.query('DELETE FROM evidence_index WHERE team_id=$1', [teamId]);
   },
 
-  // ── pending intents (confirm-before-generate, docs/23 §5) ─────────
+  // ── pending intents (confirm-before-generate) ─────────────────────
   async createIntent(teamId, { kind, params, requested_by, channel_id }) {
     const { rows } = await pool.query(
       `INSERT INTO pending_intents (team_id, kind, params, requested_by, channel_id)
@@ -216,6 +216,20 @@ export const db = {
   },
   async setIntentMessage(intentId, messageTs) {
     await pool.query('UPDATE pending_intents SET message_ts=$2 WHERE id=$1', [intentId, messageTs]);
+  },
+  async getIntent(intentId) {
+    const { rows } = await pool.query('SELECT * FROM pending_intents WHERE id=$1', [intentId]);
+    return rows[0] ?? null;
+  },
+  async mergeIntentParams(intentId, patch) {
+    // Change-scope merges pointer/label params ({evidence:[{c,ts}], sections,
+    // notes}) into a still-pending intent — same no-message-content rule as
+    // createIntent's params.
+    const { rows } = await pool.query(
+      `UPDATE pending_intents SET params = params || $2::jsonb
+       WHERE id=$1 AND status='pending' RETURNING *`,
+      [intentId, JSON.stringify(patch ?? {})]);
+    return rows[0] ?? null;
   },
   async getIntentByMessage(channelId, messageTs) {
     const { rows } = await pool.query(

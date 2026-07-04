@@ -5,7 +5,7 @@ import { runIntent, markCardRunning, markCardCancelled } from '../agent/intents.
 import { confirmCard, shareCard } from './cards.js';
 import '../services/exportpack.js'; // side effect: registers the export_pack/answers intent executors
 
-// docs/22 §4.2: every channel follow-up threads under the triggering message
+// Every channel follow-up threads under the triggering message
 // — this exact line is the fix for "view more should land in the same
 // thread." Applies to legacy handlers too.
 const replyTarget = (body) => body.message?.thread_ts ?? body.message?.ts;
@@ -167,7 +167,7 @@ export function registerActions(app) {
   });
 
   // All of grantCardV2's tail actions (Why/Watch/Not relevant/Share) live in
-  // one overflow menu (docs/23 §2.1) — one action_id, dispatched by the
+  // one overflow menu — one action_id, dispatched by the
   // option's embedded `v`. "View on Grants.gov" opens via the option's own
   // `url` and never reaches here.
   app.action('gw:grant:overflow', async ({ ack, action, body, client }) => {
@@ -190,6 +190,21 @@ export function registerActions(app) {
       await openSharePicker(client, { o, channel: body.channel.id, user: body.user.id, thread_ts });
     }
   });
+
+  // forecastCard's primary button emits gw:grant:watch directly (the same
+  // logical action also reachable via gw:grant:overflow's Watch option).
+  app.action('gw:grant:watch', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    await db.addWatch(body.team.id, { kind: 'opp', params: { opp_id: o }, created_by: body.user.id });
+    await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+      text: "🔮 Watching this one — I'll flag it if it opens or new similar matches appear." });
+  });
+
+  // URL buttons (open canvas / open shared link) — Slack opens the URL
+  // client-side; these acks just stop Bolt logging an unhandled-action error.
+  app.action('gw:draft:open', async ({ ack }) => { await ack(); });
+  app.action('gw:share:open', async ({ ack }) => { await ack(); });
 
   app.view('gw_not_relevant_submit', async ({ ack, body, view, client }) => {
     await ack();
@@ -243,17 +258,20 @@ export function registerActions(app) {
       text: `Moved *${opp?.title ?? o}* → _${stage}_.` });
   });
 
-  app.action('gw:pipe:owner', async ({ ack, action, body, client }) => {
-    await ack();
-    const { o } = val(action);
-    const thread_ts = replyTarget(body);
+  async function askOwnerPick(client, { o, channel, user, thread_ts }) {
     await client.chat.postEphemeral({
-      channel: body.channel.id, user: body.user.id, thread_ts,
+      channel, user, thread_ts,
       text: 'Assign to whom?',
       blocks: [{ type: 'actions', elements: [{ type: 'users_select', action_id: 'gw:pipe:owner:pick',
         placeholder: { type: 'plain_text', text: 'Pick a teammate' } }] }],
     });
-    pendingOwner.set(`${body.channel.id}:${body.user.id}`, { o, thread_ts });
+    pendingOwner.set(`${channel}:${user}`, { o, thread_ts });
+  }
+
+  app.action('gw:pipe:owner', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    await askOwnerPick(client, { o, channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body) });
   });
 
   app.action('gw:pipe:owner:pick', async ({ ack, action, body, client }) => {
@@ -275,36 +293,30 @@ export function registerActions(app) {
     }).catch(() => {});
   });
 
-  app.action('gw:pipe:canvas', async ({ ack, action, body, client }) => {
-    await ack();
-    const { o } = val(action);
-    const opp = (await db.listOpportunities(body.team.id)).find((x) => x.opp_id === String(o));
+  async function postCanvasLink(client, { o, teamId, channel, user, thread_ts }) {
+    const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     if (!opp?.canvas_id) {
-      await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+      await client.chat.postEphemeral({ channel, user, thread_ts,
         text: "No draft exists yet — ask me to draft it and I'll create the canvas." });
       return;
     }
-    await client.chat.postMessage({ channel: body.channel.id, thread_ts: replyTarget(body),
+    await client.chat.postMessage({ channel, thread_ts,
       text: `📄 Canvas for *${opp.title}*: ${await canvasLink(client, opp.canvas_id)}` });
-  });
+  }
 
-  app.action('gw:pipe:activity', async ({ ack, action, body, client }) => {
-    await ack();
-    const { o } = val(action);
-    const rows = await db.listActivity(body.team.id, o, 10);
+  async function postActivity(client, { o, teamId, channel, thread_ts }) {
+    const rows = await db.listActivity(teamId, o, 10);
     await client.chat.postMessage({
-      channel: body.channel.id, thread_ts: replyTarget(body),
+      channel, thread_ts,
       text: rows.length
         ? rows.map((r) => `• ${new Date(r.at).toLocaleDateString('en-US')} — ${r.summary}`).join('\n')
         : '_No activity logged yet._',
     });
-  });
+  }
 
-  app.action('gw:pipe:export', async ({ ack, action, body, client }) => {
-    await ack();
-    const { o } = val(action);
+  async function openExportMenu(client, { o, channel, user, thread_ts }) {
     await client.chat.postEphemeral({
-      channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+      channel, user, thread_ts,
       text: 'Export what?',
       blocks: [{ type: 'actions', elements: [
         { type: 'button', action_id: 'gw:export:md', value: JSON.stringify({ o }),
@@ -315,16 +327,50 @@ export function registerActions(app) {
           text: { type: 'plain_text', text: '📣 Share to channel' }, accessibility_label: 'Share this opportunity to a channel' },
       ] }],
     });
+  }
+
+  async function removeOpp(client, { o, teamId, channel, user, thread_ts }) {
+    await db.moveOpportunity(teamId, o, 'declined');
+    await db.logActivity(teamId, o, { actor: user, kind: 'stage_move', summary: `Removed (declined) by <@${user}>` });
+    await client.chat.postEphemeral({ channel, user, thread_ts,
+      text: 'Removed from the active pipeline (kept as declined, never deleted).' });
+  }
+
+  app.action('gw:pipe:canvas', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    await postCanvasLink(client, { o, teamId: body.team.id, channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body) });
+  });
+
+  app.action('gw:pipe:activity', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    await postActivity(client, { o, teamId: body.team.id, channel: body.channel.id, thread_ts: replyTarget(body) });
+  });
+
+  app.action('gw:pipe:export', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    await openExportMenu(client, { o, channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body) });
   });
 
   app.action('gw:pipe:remove', async ({ ack, action, body, client }) => {
     await ack();
     const { o } = val(action);
-    const teamId = body.team.id;
-    await db.moveOpportunity(teamId, o, 'declined');
-    await db.logActivity(teamId, o, { actor: body.user.id, kind: 'stage_move', summary: `Removed (declined) by <@${body.user.id}>` });
-    await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
-      text: 'Removed from the active pipeline (kept as declined, never deleted).' });
+    await removeOpp(client, { o, teamId: body.team.id, channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body) });
+  });
+
+  // pipelineCard's tail actions live in one overflow menu — one action_id,
+  // dispatched by the option's embedded `v` (same pattern as gw:grant:overflow).
+  app.action('gw:pipe:overflow', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o, v } = JSON.parse(action.selected_option.value);
+    const common = { o, teamId: body.team.id, channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body) };
+    if (v === 'gw:pipe:owner') await askOwnerPick(client, { o, channel: common.channel, user: common.user, thread_ts: common.thread_ts });
+    else if (v === 'gw:pipe:canvas') await postCanvasLink(client, common);
+    else if (v === 'gw:pipe:export') await openExportMenu(client, common);
+    else if (v === 'gw:pipe:activity') await postActivity(client, common);
+    else if (v === 'gw:pipe:remove') await removeOpp(client, common);
   });
 
   // ── gw:draft:* ─────────────────────────────────────────────────────
@@ -405,7 +451,7 @@ export function registerActions(app) {
     }
   });
 
-  // ── gw:intent:* (confirm-before-generate, docs/23 §5) ────────────────
+  // ── gw:intent:* (confirm-before-generate) ────────────────────────────
   app.action('gw:intent:confirm', async ({ ack, action, body, client }) => {
     await ack();
     const { i } = val(action);
@@ -419,12 +465,73 @@ export function registerActions(app) {
     await runIntent(client, row);
   });
 
+  const DRAFT_SECTIONS = ['Statement of Need', 'Our Program', 'Evidence of Impact', 'Funding Request', 'About Org'];
+
   app.action('gw:intent:scope', async ({ ack, action, body, client }) => {
     await ack();
-    await client.chat.postEphemeral({
-      channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
-      text: "Reply here with what to change (which evidence to use, sections to emphasize) and ask me again — I'll re-line-up the card with the new scope.",
+    const { i } = val(action);
+    const intent = await db.getIntent(i);
+    if (!intent || intent.status !== 'pending') {
+      await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+        text: 'That one already ran (or expired) — ask me again and a fresh card will appear.' });
+      return;
+    }
+    const locker = await db.listEvidence(body.team.id, 20);
+    const evidenceOptions = locker.map((p) => ({
+      text: { type: 'plain_text', text: `${p.tag ?? 'story'} · <#${p.channel_id}> · ${String(p.message_ts).split('.')[0]}`.slice(0, 75) },
+      value: JSON.stringify({ c: p.channel_id, ts: p.message_ts }),
+    }));
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal', callback_id: 'gw_intent_scope_submit',
+        private_metadata: JSON.stringify({ i, channel: intent.channel_id, message_ts: intent.message_ts }),
+        title: { type: 'plain_text', text: 'Change scope' },
+        submit: { type: 'plain_text', text: 'Update' }, close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          ...(evidenceOptions.length ? [{
+            type: 'input', block_id: 'evidence', optional: true,
+            label: { type: 'plain_text', text: 'Pin specific evidence (from your locker)' },
+            element: { type: 'multi_static_select', action_id: 'value',
+              placeholder: { type: 'plain_text', text: 'Pick evidence to use' }, options: evidenceOptions },
+          }] : []),
+          { type: 'input', block_id: 'sections', optional: true,
+            label: { type: 'plain_text', text: 'Emphasize sections' },
+            element: { type: 'checkboxes', action_id: 'value',
+              options: DRAFT_SECTIONS.map((s) => ({ text: { type: 'plain_text', text: s }, value: s })) } },
+          { type: 'input', block_id: 'notes', optional: true,
+            label: { type: 'plain_text', text: 'Anything else I should know?' },
+            element: { type: 'plain_text_input', action_id: 'value', multiline: true,
+              placeholder: { type: 'plain_text', text: 'e.g. lead with the attendance numbers; keep it under one page' } } },
+        ],
+      },
     });
+  });
+
+  app.view('gw_intent_scope_submit', async ({ ack, body, view, client }) => {
+    await ack();
+    const { i, channel, message_ts } = JSON.parse(view.private_metadata || '{}');
+    const picked = view.state.values.evidence?.value?.selected_options ?? [];
+    const evidence = picked.map((o) => JSON.parse(o.value));
+    const sections = (view.state.values.sections?.value?.selected_options ?? []).map((o) => o.value);
+    const notes = view.state.values.notes?.value?.value || undefined;
+    const patch = {};
+    if (evidence.length) patch.evidence = evidence;
+    if (sections.length) patch.sections = sections;
+    if (notes) patch.notes = notes;
+    const intent = await db.mergeIntentParams(i, patch);
+    if (!intent) return; // claimed/cancelled while the modal was open — the card already says so
+    const bits = [
+      evidence.length ? `*${evidence.length}* pinned evidence item${evidence.length === 1 ? '' : 's'}` : null,
+      sections.length ? `emphasis on _${sections.join(', ')}_` : null,
+      notes ? 'your extra notes' : null,
+    ].filter(Boolean);
+    const summary = `Scope updated — I'll use ${bits.join(' + ') || 'the default scope'}. Same plan otherwise.`;
+    await client.chat.update({
+      channel, ts: message_ts,
+      text: 'Ready to weave (scope updated)',
+      blocks: confirmCard(intent, { summary, etaSeconds: 40 }),
+    }).catch((e) => console.warn('[gw:intent:scope]', e?.data?.error ?? e.message));
   });
 
   app.action('gw:intent:cancel', async ({ ack, action, body, client }) => {
@@ -435,7 +542,7 @@ export function registerActions(app) {
     if (intent) await markCardCancelled(client, intent);
   });
 
-  // ── gw:export:* (docs/23 §7 — entry points from the pipe:export menu) ─
+  // ── gw:export:* (entry points from the pipe:export menu) ─────────────
   app.action('gw:export:md', async ({ ack, action, body }) => {
     await ack();
     const { o } = val(action);

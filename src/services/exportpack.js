@@ -1,4 +1,4 @@
-// Exports (docs/23 §7): fresh, zero-retention artifacts handed to the user —
+// Exports: fresh, zero-retention artifacts handed to the user —
 // nothing here is stored, everything is re-read live at export time.
 import { db } from './db.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';

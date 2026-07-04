@@ -43,7 +43,8 @@
         "callback_id": "gw_shortcut_due",
         "description": "Your grant deadlines at a glance"
       }
-    ]
+    ],
+    "unfurl_domains": ["grantweaver.up.railway.app"]
   },
   "oauth_config": {
     "redirect_urls": ["https://grantweaver.up.railway.app/slack/oauth_redirect"],
@@ -131,7 +132,6 @@
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,
     "token_rotation_enabled": false,
-    "is_mcp_enabled": true,
-    "unfurl_domains": ["grantweaver.up.railway.app"]
+    "is_mcp_enabled": true
   }
 }

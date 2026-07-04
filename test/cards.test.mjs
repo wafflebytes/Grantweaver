@@ -5,7 +5,7 @@ import {
 } from '../src/surfaces/cards.js';
 
 // Minimal structural validation: every card is a non-empty array of blocks,
-// every block has a `type`, and (per docs/23 §2) every card carries at least
+// every block has a `type`, and every card carries at least
 // one action.
 function assertValidBlocks(blocks) {
   expect(Array.isArray(blocks)).toBe(true);

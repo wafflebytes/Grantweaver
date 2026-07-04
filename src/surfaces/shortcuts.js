@@ -2,8 +2,8 @@ import { db } from '../services/db.js';
 import { runAgentTurn } from '../agent/loop.js';
 import { saveEvidenceFromMessage } from './reactions.js';
 
-/** Fallback streamer for contexts with no sayStream (modal-triggered DMs,
- * docs/23 §8 VERIFY-FIRST note) — accumulates text, posts once at the end.
+/** Fallback streamer for contexts with no sayStream (modal-triggered DMs —
+ * Bolt only injects sayStream into message handlers). Accumulates text, posts once at the end.
  * No streaming texture, but the turn still completes and replies. */
 function makePostMessageStreamer({ client, channel }) {
   let buf = '';

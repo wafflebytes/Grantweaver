@@ -1,4 +1,4 @@
--- Phase 2 (docs/21-28). Pointers/metadata only — the Class-A guard from
+-- Phase 2. Pointers/metadata only — the Class-A guard from
 -- 001_init.sql applies to every table below. No column may hold Slack
 -- message content.
 
@@ -23,9 +23,8 @@ ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS canvas_written_at    TIMESTAM
 ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS last_activity_at     TIMESTAMPTZ DEFAULT now();
 ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS forecast             BOOLEAN DEFAULT FALSE;
 
--- docs/23 §3 note: gw:ev:link needs a join column on evidence_pointers,
--- added here rather than as a separate 003 migration. `strength` backs the
--- evidenceCardV2 "Strength: weak/solid/star" overflow action (docs/23 §2.4) —
+-- gw:ev:link needs a join column on evidence_pointers. `strength` backs the
+-- evidenceCardV2 "Strength: weak/solid/star" overflow action —
 -- distinct from `tag` (evidence kind: metric/story/testimonial/other).
 ALTER TABLE evidence_pointers ADD COLUMN IF NOT EXISTS opp_id TEXT;
 ALTER TABLE evidence_pointers ADD COLUMN IF NOT EXISTS strength TEXT DEFAULT 'solid'
@@ -75,7 +74,7 @@ CREATE TABLE IF NOT EXISTS evidence_index (
   UNIQUE (team_id, theme, channel_id)
 );
 
--- Pending intents: confirm-before-generate (docs/23 §5). A card offers a slow
+-- Pending intents: confirm-before-generate. A card offers a slow
 -- action; the row holds its params until the user confirms or it expires.
 CREATE TABLE IF NOT EXISTS pending_intents (
   id           BIGSERIAL PRIMARY KEY,

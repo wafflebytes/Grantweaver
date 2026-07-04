@@ -4,8 +4,8 @@ import { makeThreadStreamer } from '../agent/streamer.js';
 
 const COPY_ERROR_GENERIC = 'Something snagged on my end 🧶 — try that again in a moment, or ask me in a DM.';
 
-// event_id LRU dedupe — Slack event retries must not double-run a turn
-// (docs/17 B14). Trimmed at 500 so it never grows unbounded.
+// event_id dedupe — Slack event retries must not double-run a turn.
+// Trimmed at 500 so it never grows unbounded.
 const seen = new Set();
 function markSeen(id) {
   seen.add(id);
@@ -36,7 +36,7 @@ export function registerMention(app) {
         channelId: event.channel,
         threadTs,
         contextChannelId: event.channel, // bias evidence search to where the mention happened
-        // VERIFY-FIRST (docs/12 §5): unconfirmed whether action_token rides on
+        // Unconfirmed whether action_token rides on
         // app_mention the way it does on message.im — if absent, RTS runs in
         // keyword mode without it and the evidence prefetch is skipped
         // (toolbelt.search_workspace tolerates a missing actionToken).

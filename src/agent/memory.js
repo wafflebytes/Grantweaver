@@ -1,8 +1,8 @@
 // Agent turns are otherwise stateless: a follow-up like "the OJJDP one
 // please, draft it now" arrives with zero memory of what a prior turn found.
 // Both fns pull a short window of history transiently, in-prompt, for one
-// turn only — nothing here is written to our DB (Class A guard, docs/03
-// §3b); it's re-fetched from Slack fresh on every turn.
+// turn only — nothing here is ever written to our DB; it's re-fetched from
+// Slack fresh on every turn.
 const HISTORY_TURNS = 6;
 
 export async function fetchRecentHistory(client, channelId, botUserId, currentTs) {
@@ -19,7 +19,7 @@ export async function fetchRecentHistory(client, channelId, botUserId, currentTs
 
 // Thread history for app_mention turns. Multiple people can speak in one
 // thread, so user messages are prefixed <@id>: so the model can track who
-// asked what (required for the multi-persona demo, docs/27 §1.1).
+// asked what.
 export async function fetchThreadHistory(client, channelId, threadTs, botUserId, currentTs, cap = 12) {
   const { messages = [] } = await client.conversations.replies({
     channel: channelId, ts: threadTs, limit: cap + 1,

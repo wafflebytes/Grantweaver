@@ -50,6 +50,7 @@ export function normalizeRtsResult(res) {
     kind: 'message',
     snippet: String(m.content ?? '').slice(0, 400),
     author: m.author_name ?? 'teammate',
+    author_user_id: m.author_user_id ?? '',
     author_is_bot: !!m.is_author_bot,
     channel_id: m.channel_id ?? '',
     channel_name: m.channel_name ?? '',
@@ -78,7 +79,7 @@ export async function searchWorkspace(client, {
     query,
     content_types: [contentTypes],       // live API: array, not string
     channel_types: ['public_channel'],   // live API: array; MVP scope = bot-token public channels
-    include_bots: true,                  // seed messages are bot-authored (08 §3)
+    include_bots: true,                  // demo seed messages are bot-authored
     limit: Math.min(limit, 20),          // live API caps at 20
     ...(actionToken ? { action_token: actionToken } : {}),
     ...(contextChannelId ? { context_channel_id: contextChannelId } : {}),

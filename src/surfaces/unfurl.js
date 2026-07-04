@@ -1,6 +1,6 @@
-// link_shared → chat.unfurl (docs/23 §9). We only unfurl our own domain
-// (APP_BASE_URL) — grants.gov unfurls are out, we don't own that domain
-// (docs/22 §7). Failures are swallowed; never unfurl in DMs with other apps.
+// link_shared → chat.unfurl. We only unfurl our own domain
+// (APP_BASE_URL) — grants.gov unfurls are out, we don't own that domain.
+// Failures are swallowed; never unfurl in DMs with other apps.
 import { verifyOrgToken } from '../services/weblink.js';
 import { db } from '../services/db.js';
 

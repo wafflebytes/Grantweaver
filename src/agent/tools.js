@@ -87,19 +87,35 @@ export function buildToolbelt(ctx) {
   const { client, teamId, channelId, threadTs, actionToken, contextChannelId, userId } = ctx;
   const say = (payload) =>
     client.chat.postMessage({ channel: channelId, thread_ts: threadTs, ...payload });
+  // One turn can run search_workspace more than once (evidence prefetch +
+  // the model's own re-search) — remember what's already been carded so the
+  // same hit never posts twice in a thread.
+  const cardedPermalinks = new Set();
 
   return {
     async search_workspace({ query, content_types = 'messages', tag_hint = 'story' }) {
       const mode = await detectSearchMode(client, teamId);
       const q = mode === 'keyword' ? expandKeywordQuery(query) : query;
-      const results = await searchWorkspace(client, {
+      const rawResults = await searchWorkspace(client, {
         query: q, contentTypes: content_types, actionToken, contextChannelId,
       });
-      // Cards are always posted when there are hits — F5: the model must not be
+      // Messages that are themselves conversations WITH or FROM the bot
+      // (mentions, asks, the bot's own replies) aren't evidence — a channel
+      // mention otherwise gets its own question (and the bot's last answer)
+      // back as top "hits". Note mentions render as <@ID|name>, so match the
+      // prefix, not <@ID>. Transient filter, nothing stored.
+      const results = rawResults.filter((r) =>
+        r.message_ts !== ctx.messageTs
+        && !(ctx.botUserId && (
+          r.snippet?.includes(`<@${ctx.botUserId}`)
+          || r.author_user_id === ctx.botUserId)));
+      // Cards are always posted when there are hits — the model must not be
       // able to narrate strong evidence in prose only; permalink cards are the
       // demo's "not a wrapper" proof and have to land on screen every time.
       const pipeline = teamId ? await db.listOpportunities(teamId) : [];
       for (const ev of results.slice(0, 4)) {
+        if (ev.permalink && cardedPermalinks.has(ev.permalink)) continue;
+        if (ev.permalink) cardedPermalinks.add(ev.permalink);
         await say({ text: `Evidence: ${ev.snippet.slice(0, 80)}`, blocks: evidenceCardV2({ ...ev, tag: tag_hint }, { pipeline }) });
       }
       return {
@@ -156,7 +172,7 @@ export function buildToolbelt(ctx) {
       return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored).' };
     },
 
-    // Confirm-before-generate (docs/23 §5, docs/27 §1.1): the model has
+    // Confirm-before-generate: the model has
     // already written the full draft as this tool call's argument — what's
     // deferred is publishing it. The actual canvas write happens in
     // agent/intents.js's draft executor once the user confirms.

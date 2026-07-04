@@ -1,4 +1,4 @@
-// Phase 2 card grammar (docs/23 §2, docs/21 D8): primary button (style:
+// Phase 2 card grammar: primary button (style:
 // primary) + up to 2 secondaries + one overflow for the tail. Every card
 // with provenance ends with a context line. Pure functions → block arrays,
 // same append-only discipline as blocks.js (which stays frozen for legacy
@@ -214,7 +214,7 @@ export function deadlineCard(opp, days) {
   ];
 }
 
-// ── Confirm-before-generate (docs/23 §5) ──────────────────────────────
+// ── Confirm-before-generate ───────────────────────────────────────────
 const KIND_LABELS = { draft: 'Draft LOI', revise: 'Revision', export_pack: 'Export pack', answers: 'Copy-ready answers', rescan: 'Workspace rescan' };
 
 export function confirmCard(intent, { summary, etaSeconds }) {
@@ -237,7 +237,7 @@ export function confirmCard(intent, { summary, etaSeconds }) {
   ];
 }
 
-// ── Onboarding scan summary (docs/25 §2) ──────────────────────────────
+// ── Onboarding scan summary ───────────────────────────────────────────
 export function scanSummaryCard({ index = [], webUrl } = {}) {
   const byTheme = new Map();
   for (const row of index) {
@@ -265,7 +265,7 @@ export function scanSummaryCard({ index = [], webUrl } = {}) {
   ];
 }
 
-// ── Proactive: update request (docs/25 §5) ────────────────────────────
+// ── Proactive: update request ─────────────────────────────────────────
 export function updateRequestCard(opp) {
   const days = daysUntil(opp.close_date);
   return [
@@ -285,7 +285,7 @@ export function updateRequestCard(opp) {
   ];
 }
 
-// ── Share (compact — one link button, docs/23 §7.3) ───────────────────
+// ── Share (compact — one link button) ─────────────────────────────────
 export function shareCard(entity) {
   const link = entity.canvasUrl ?? entity.url;
   return [

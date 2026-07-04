@@ -39,9 +39,9 @@ check('evidence guard rejects content keys', guardThrew);
 const orgs = await pool.query('SELECT count(*)::int AS n FROM orgs');
 check('org profile exists', orgs.rows[0].n >= 1);
 
-// 6. Compliance: pending_intents.params (docs/22 §1) is a free-form JSONB
+// 6. Compliance: pending_intents.params is a free-form JSONB
 // column by necessity — the column-name scan above can't catch a drafted
-// document's markdown landing in there (P1.2 bug, fixed in intents.js's
+// document's markdown landing in there (a real bug once, fixed in intents.js's
 // in-process stash). Scan actual VALUES for tell-tale citation markdown.
 const intentRows = await pool.query("SELECT id, params FROM pending_intents WHERE kind='draft'");
 const leaked = intentRows.rows.filter((r) => /\]\(https?:\/\//.test(JSON.stringify(r.params)));

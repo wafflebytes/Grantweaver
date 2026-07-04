@@ -1,10 +1,10 @@
-// Deterministic intent executors (docs/22 §4.3): run AFTER a pending_intents
+// Deterministic intent executors: run AFTER a pending_intents
 // row is claimed, OUTSIDE the model's tool loop — no further LLM tool-calling,
 // just the specific slow job the confirm card promised. Each kind's executor
-// is added by the workstream that owns it; P1.2 wires the mechanism + 'draft'.
-// 'revise' is P2.2, 'rescan' is P4.1; 'export_pack'/'answers' are wired by
-// P1.3 (exportpack.js imports this module to register them, avoiding a
-// circular import from here).
+// registers from the module that owns it: 'draft' lives here;
+// 'export_pack'/'answers' register from exportpack.js (it imports this module,
+// avoiding a circular import from here); 'revise' and 'rescan' arrive with
+// their features.
 import { db } from '../services/db.js';
 import { createDraftCanvas } from '../services/canvas.js';
 import { syncOpportunityToList } from '../services/lists.js';
@@ -20,7 +20,7 @@ export function registerIntentExecutor(kind, fn) {
   executors.set(kind, fn);
 }
 
-// Class-A guard (docs/03 §3b, docs/22 §1): pending_intents.params is a
+// Content-at-rest guard: pending_intents.params is a
 // PERSISTED table column, and a model-drafted document can contain verbatim
 // quoted Slack content (citations copy source text exactly, by design). A
 // draft generated inside the model's tool call is therefore held HERE,
@@ -69,9 +69,24 @@ export async function runIntent(client, intent) {
   }
 }
 
+/** Re-read one pinned evidence pointer's exact message live — never from storage. */
+async function rereadPinned(client, { c, ts }) {
+  try {
+    const { messages = [] } = await client.conversations.history({
+      channel: c, latest: ts, oldest: ts, inclusive: true, limit: 1,
+    });
+    const m = messages[0];
+    if (!m?.text) return null;
+    const { permalink } = await client.chat.getPermalink({ channel: c, message_ts: ts }).catch(() => ({ permalink: '' }));
+    return { snippet: m.text, author: m.user ? `<@${m.user}>` : 'teammate', permalink };
+  } catch {
+    return null;
+  }
+}
+
 registerIntentExecutor('draft', async (client, intent) => {
   const teamId = intent.team_id;
-  const { opp_id, notes } = intent.params;
+  const { opp_id, notes, evidence: pinned, sections } = intent.params;
   let title, markdown;
   const stashed = draftCache.get(intent.id);
   if (stashed) {
@@ -93,17 +108,22 @@ registerIntentExecutor('draft', async (client, intent) => {
     ]);
     title = `Letter of Intent — ${opp?.title ?? oppDetails?.title ?? opp_id}`;
     await post('_Searching your workspace for evidence…_');
+    // Change-scope pinned evidence: exact pointers the user picked — re-read
+    // live by ts, used alongside (and listed ahead of) the fresh search.
+    const pinnedEvidence = (await Promise.all((pinned ?? []).map((p) => rereadPinned(client, p)))).filter(Boolean);
     const query = notes || `${opp?.title ?? ''} outcomes evidence testimonial`.trim();
     const mode = await detectSearchMode(client, teamId);
     const results = await searchWorkspace(client, {
       query: mode === 'keyword' ? expandKeywordQuery(query) : query, contentTypes: 'messages',
     }).catch(() => []);
     await post('_Drafting…_');
-    const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount: results.length, contextChannelId: undefined });
+    const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount: pinnedEvidence.length + results.length, contextChannelId: undefined });
     const userMsg = [
       `Draft the Letter of Intent for this opportunity now — you already have everything you need, do not ask questions.`,
       `OPPORTUNITY: ${JSON.stringify(oppDetails ?? opp ?? { opp_id })}`,
+      pinnedEvidence.length ? `PINNED EVIDENCE (the user chose these — use them, cite permalinks exactly as given): ${JSON.stringify(pinnedEvidence)}` : '',
       `WORKSPACE EVIDENCE FOUND (cite permalinks exactly as given): ${JSON.stringify(results.slice(0, 8))}`,
+      sections?.length ? `EMPHASIZE THESE SECTIONS: ${sections.join(', ')}` : '',
       notes ? `EXTRA INSTRUCTIONS: ${notes}` : '',
       'Output ONLY the markdown document, following the Letter of Intent skeleton in your instructions. No preamble.',
     ].filter(Boolean).join('\n\n');

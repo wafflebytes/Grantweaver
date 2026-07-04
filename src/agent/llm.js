@@ -1,4 +1,4 @@
-// Shared OpenAI-compat client (docs/03 §2b — no Anthropic SDK). Split out of
+// Shared OpenAI-compat client (provider-agnostic, swapped via LLM_* env). Split out of
 // loop.js so intent executors (agent/intents.js, services/exportpack.js,
 // prompts/classifiers.js) can run one-shot completions without importing
 // loop.js — loop.js imports tools.js, and tools.js needs to import intents.js
@@ -40,7 +40,7 @@ export async function withRetry(fn, attempts = 3) {
   throw last;
 }
 
-/** Deterministic intent executors (docs/22 §4.3) and classifiers run OUTSIDE
+/** Deterministic intent executors and classifiers run OUTSIDE
  * the tool loop: one completion, no tools, same retry/model config. */
 export async function completeOnce(messages, { maxTokens = MAX_TOKENS, temperature = 0.2 } = {}) {
   const response = await withRetry(() =>

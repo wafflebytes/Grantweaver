@@ -14,7 +14,7 @@ const LOADING = [
   'Weaving it all together…',
 ];
 
-// State-aware suggested prompts (docs/23 §10, copy docs/27 §6.8).
+// State-aware suggested prompts.
 const NO_ORG_PROMPTS = [
   { title: 'Set up my organization',            message: 'Help me set up my organization profile.' },
   { title: 'What can you do?',                  message: 'What can you do?' },

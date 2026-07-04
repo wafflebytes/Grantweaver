@@ -29,7 +29,7 @@ export function startScheduler(app) {
     }
   });
 
-  // Intent expiry (docs/22 §1): a confirm card nobody ever clicked shouldn't
+  // Intent expiry: a confirm card nobody ever clicked shouldn't
   // stay "pending" forever — sweep hourly.
   cron.schedule('0 * * * *', async () => {
     const n = await db.expireStaleIntents(24).catch((e) => { console.error('[intents:expire]', e?.message ?? e); return 0; });

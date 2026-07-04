@@ -7,7 +7,7 @@ import { getLlm, withRetry, MODEL, MAX_TOKENS } from './llm.js';
 
 export { completeOnce } from './llm.js';
 
-// Task-timeline labels per tool (docs/27 §6.4) — texture for streamed turns.
+// Task-timeline labels per tool — texture for streamed turns.
 const TASK_LABELS = {
   search_workspace: 'Searching your workspace',
   search_grants: 'Checking Grants.gov',

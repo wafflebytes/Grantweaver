@@ -10,7 +10,7 @@ describe('parseOrgToken', () => {
     expect(parseOrgToken('https://grantweaver.up.railway.app/org/abc123/')).toBe('abc123');
   });
 
-  it('returns null for a foreign domain — we only unfurl our own (docs/22 §7)', () => {
+  it('returns null for a foreign domain — we only unfurl our own', () => {
     expect(parseOrgToken('https://grants.gov/org/abc123')).toBeNull();
   });
 

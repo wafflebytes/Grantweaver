@@ -1,7 +1,7 @@
-// Stateless HMAC magic links (docs/22 §6) — no sessions, no accounts. Anyone
+// Stateless HMAC magic links — no sessions, no accounts. Anyone
 // holding the URL for the token's 7-day window can view the org's read-only
-// evidence-index page (WS-P6); Class-A guard still applies to what the page
-// renders (org-approved theme labels/counts, never message content).
+// evidence-index page; the no-content-at-rest rule still applies to what the
+// page renders (org-approved theme labels/counts, never message content).
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
