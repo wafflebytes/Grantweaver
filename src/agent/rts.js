@@ -58,20 +58,26 @@ export function normalizeRtsResult(res) {
     permalink: m.permalink ?? '',
     message_ts: m.message_ts ?? '',
   }));
-  const fromFiles = files.map((f) => ({
-    kind: 'file',
-    // f.content (extracted file text) isn't always populated by Slack's
-    // search index — when it's missing, say so explicitly rather than
-    // silently substituting the filename as if it were a quoted excerpt.
-    snippet: f.content ? String(f.content).slice(0, 400) : `📎 ${f.title || 'file'} (no extracted text available — open the file to review)`,
-    author: f.title ?? 'file',
-    author_is_bot: false,
-    channel_id: '',
-    channel_name: '',
-    date: '',
-    permalink: f.permalink ?? '',
-    message_ts: '',
-  }));
+  // Slack represents Lists and Canvases as file-type objects too — they are
+  // structural workspace artifacts, never raw program evidence, so exclude
+  // them before they can get card-ified as if they were a saved quote/photo.
+  const NON_EVIDENCE_FILETYPES = new Set(['list', 'canvas', 'quip']);
+  const fromFiles = files
+    .filter((f) => !NON_EVIDENCE_FILETYPES.has(f.filetype))
+    .map((f) => ({
+      kind: 'file',
+      // f.content (extracted file text) isn't always populated by Slack's
+      // search index — when it's missing, say so explicitly rather than
+      // silently substituting the filename as if it were a quoted excerpt.
+      snippet: f.content ? String(f.content).slice(0, 400) : `📎 ${f.title || 'file'} (no extracted text available — open the file to review)`,
+      author: f.title ?? 'file',
+      author_is_bot: false,
+      channel_id: '',
+      channel_name: '',
+      date: '',
+      permalink: f.permalink ?? '',
+      message_ts: '',
+    }));
   return [...fromMessages, ...fromFiles].filter((r) => r.snippet);
 }
 

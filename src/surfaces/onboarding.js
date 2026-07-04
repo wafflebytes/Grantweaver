@@ -348,7 +348,7 @@ export function setupModal(org) {
     blocks: [
       input('org_name', 'Organization name',
         { type: 'plain_text_input', initial_value: org?.org_name ?? '',
-          placeholder: { type: 'plain_text', text: 'Riverbend Youth Collective' } }),
+          placeholder: { type: 'plain_text', text: 'e.g. Northside Youth Collective' } }),
       input('mission', 'Mission in one sentence',
         { type: 'plain_text_input', multiline: true, initial_value: org?.mission ?? '',
           placeholder: { type: 'plain_text', text: 'After-school mentorship for under-served youth in Dayton, Ohio' } }),

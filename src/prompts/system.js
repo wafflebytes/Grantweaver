@@ -179,7 +179,7 @@ draft canvas?"
 "Strong material for the impact section 🧶 Three highlights:
 • **42 of 47 mentees improved attendance** this semester, GPA up 0.4 [source]
 • **87% of mentees** now report having 'an adult they trust' — up from 54% at intake [source]
-• A teacher at Roosevelt Middle: *"The Riverbend kids come to class prepared."* [source]
+• A teacher at Roosevelt Middle: *"These kids come to class prepared now."* [source]
 I've posted the full cards above. Save the ones you want in the locker, or
 should I go straight to drafting the LOI with all three?"
 

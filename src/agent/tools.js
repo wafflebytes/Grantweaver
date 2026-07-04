@@ -16,6 +16,17 @@ import { runWorkspaceScan } from '../services/scan.js';
 const fitCache = new Map(); // opp_id -> {at, fit}
 const FIT_TTL = 10 * 60 * 1000;
 
+let botNameCache = null;
+async function getBotName(client) {
+  if (botNameCache) return botNameCache;
+  try {
+    const { user } = await client.auth.test();
+    return (botNameCache = user ?? '');
+  } catch {
+    return '';
+  }
+}
+
 async function fitFor(teamId, org, opps) {
   const out = new Map();
   const uncached = [];
@@ -186,8 +197,17 @@ export function buildToolbelt(ctx) {
       // mention otherwise gets its own question (and the bot's last answer)
       // back as top "hits". Note mentions render as <@ID|name>, so match the
       // prefix, not <@ID>. Transient filter, nothing stored.
+      // Search API often omits author_user_id on bot messages (a known gap),
+      // so id-equality alone misses this app's OWN posts — e.g. its own
+      // "Evidence Locker — N saved pointers" summary table coming back as if
+      // it were program evidence. Seeded persona messages post through a
+      // separate seeder app with a username override, so matching this app's
+      // own bot name (not "any bot") keeps seeded evidence eligible while
+      // dropping the app's own chatter.
+      const botName = await getBotName(client);
       const notSelfTalk = inScope.filter((r) =>
         r.message_ts !== ctx.messageTs
+        && !(botName && r.author?.toLowerCase() === botName.toLowerCase())
         && !(ctx.botUserId && (
           r.snippet?.includes(`<@${ctx.botUserId}`)
           || r.author_user_id === ctx.botUserId)));

@@ -47,8 +47,17 @@ const OPENAI_TOOLS = TOOL_SCHEMAS.map((t) => ({
 // instead of making it spend its first turn deciding to ask for them.
 const EVIDENCE_INTENT = /\b(evidence|impact|attendance|gpa|grade|metric|story|stories|testimonial|workspace|mentee|mentees|outcome|outcomes|survey|beneficiar|program update|draft|loi|letter of intent|proposal|report|funder|grant report|cite|citation)\b/i;
 
+// "show me the evidence list" / "what's in the locker" are asking to read back
+// what's ALREADY saved (evidence_locker's list action) — not a request to go
+// re-search the workspace for new candidates. Without this carve-out, the
+// prefetch fires a fresh RTS search and card-spams up to 4 unrelated hits on
+// top of the locker table the model separately renders, for a query that had
+// nothing to do with finding new evidence.
+const EVIDENCE_LOOKBACK = /\bevidence (list|locker)\b|\b(list|show|see) (me |the |our |my )*(saved )?evidence\b|\bsaved evidence\b/i;
+
 export function looksEvidenceShaped(text) {
-  return EVIDENCE_INTENT.test(text ?? '');
+  const t = text ?? '';
+  return EVIDENCE_INTENT.test(t) && !EVIDENCE_LOOKBACK.test(t);
 }
 
 export async function runAgentTurn(ctx) {
