@@ -7,9 +7,9 @@ import { searchWorkspace, detectSearchMode, expandKeywordQuery } from '../agent/
 import { classifyThemes } from '../prompts/classifiers.js';
 
 const FIXED_PROBES = [
-  { label: 'attendance numbers or program metrics', query: 'attendance numbers or program metrics', content_types: 'messages' },
-  { label: 'testimonial or thank-you from a parent, teacher, or partner', query: 'testimonial or thank-you from a parent, teacher, or partner', content_types: 'messages' },
-  { label: 'photos or documents from recent program events', query: 'photos or documents from recent program events', content_types: 'files' },
+  { label: 'attendance numbers or program metrics', query: 'attendance numbers or program metrics', content_types: ['messages', 'files'] },
+  { label: 'testimonial or thank-you from a parent, teacher, or partner', query: 'testimonial or thank-you from a parent, teacher, or partner', content_types: ['messages', 'files'] },
+  { label: 'photos or documents from recent program events', query: 'photos or documents from recent program events', content_types: ['messages', 'files'] },
   { label: 'budget or funding discussions', query: 'budget or funding discussions', content_types: 'messages' },
 ];
 
@@ -19,7 +19,7 @@ export function scanQueries(org) {
   const focusQueries = focusAreas.map((f) => ({
     label: `${f} evidence`,
     query: `What results, numbers, or stories show our ${f} work is working?`,
-    content_types: 'messages',
+    content_types: ['messages', 'files'],
   }));
   return [...focusQueries, ...FIXED_PROBES].slice(0, 8);
 }

@@ -49,7 +49,7 @@ export const TOOL_SCHEMAS = [
       type: 'object',
       properties: {
         query: { type: 'string', description: "Natural-language question (semantic mode) or keyword query (keyword mode). Examples: 'How did mentee attendance change this spring?' / 'attendance OR GPA OR outcomes OR survey'" },
-        content_types: { type: 'string', enum: ['messages', 'files'], default: 'messages' },
+        content_types: { type: 'string', enum: ['messages', 'files', 'both'], default: 'both', description: "Leave as 'both' unless the user explicitly asks to search only messages or only files — evidence (attendance sheets, board PDFs, testimonial photos) is frequently file-backed." },
         tag_hint: { type: 'string', enum: ['metric', 'story', 'testimonial', 'other'], description: 'Expected evidence kind — labels the rendered cards' },
       },
       required: ['query'],
@@ -149,11 +149,11 @@ export function buildToolbelt(ctx) {
   const cardedPermalinks = new Set();
 
   return {
-    async search_workspace({ query, content_types = 'messages', tag_hint = 'story' }) {
+    async search_workspace({ query, content_types = 'both', tag_hint = 'story' }) {
       const mode = await detectSearchMode(client, teamId);
       const q = mode === 'keyword' ? expandKeywordQuery(query) : query;
       const rawResults = await searchWorkspace(client, {
-        query: q, contentTypes: content_types, actionToken, contextChannelId,
+        query: q, contentTypes: content_types === 'both' ? ['messages', 'files'] : content_types, actionToken, contextChannelId,
       });
       // Messages that are themselves conversations WITH or FROM the bot
       // (mentions, asks, the bot's own replies) aren't evidence — a channel

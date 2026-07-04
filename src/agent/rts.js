@@ -73,11 +73,15 @@ export function normalizeRtsResult(res) {
 }
 
 export async function searchWorkspace(client, {
-  query, contentTypes = 'messages', actionToken, contextChannelId, limit = 10,
+  query, contentTypes = ['messages', 'files'], actionToken, contextChannelId, limit = 10,
 }) {
   const params = {
     query,
-    content_types: [contentTypes],       // live API: array, not string
+    // live API: array, not string — search both messages and files by
+    // default in one call, since nothing upstream reliably asks for files
+    // on its own and file-backed evidence (attendance sheets, board PDFs)
+    // would otherwise never surface.
+    content_types: Array.isArray(contentTypes) ? contentTypes : [contentTypes],
     channel_types: ['public_channel'],   // live API: array; MVP scope = bot-token public channels
     include_bots: true,                  // demo seed messages are bot-authored
     limit: Math.min(limit, 20),          // live API caps at 20

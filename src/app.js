@@ -24,7 +24,7 @@ const port = Number(process.env.PORT ?? 3000);
 // The landing/privacy/support pages ship from this same service — one Railway
 // deployment hosts the app, the MCP endpoint, and the site with no extra
 // hosting or domain to manage.
-const SITE_TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
+const SITE_TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 const sitePage = (file, routePath = `/${file}`) => ({
   path: routePath,
   method: ['GET'],
@@ -80,6 +80,11 @@ export const app = new App({
     sitePage('support.html'),
     sitePage('style.css'),
     sitePage('logo.png'),
+    // Seed-persona avatars (Maya/Dre lack real sandbox user tokens, so their
+    // messages post via the bot with an icon_url override) — served here so
+    // Slack has a stable public URL to fetch at post time.
+    sitePage('avatars/dre.jpg'),
+    sitePage('avatars/maya.jpg'),
   ],
 });
 
