@@ -225,6 +225,7 @@ export function registerActions(app) {
       await client.chat.postMessage({
         channel, thread_ts,
         text: `➕ Added *${d.title}* to your pipeline (${stageLabel}) — canvas created, checklist + fit filling in. See it on my Home tab.`,
+        blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `➕ Added *${d.title}* to your pipeline (${stageLabel}) — canvas created, checklist + fit filling in. See it on my Home tab.` } }, ...buildFeedbackBlocks()],
       });
       // Closes the loop: moving straight to Drafting shouldn't require a
       // separate ask — fire the same confirm-before-generate card the

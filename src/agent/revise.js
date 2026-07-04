@@ -7,6 +7,8 @@ import { rewriteCanvas, recallDraft } from '../services/canvas.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { completeOnce } from './llm.js';
 import { registerIntentExecutor } from './intents.js';
+import { makeThreadStreamer } from './streamer.js';
+import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 
 function revisePrompt({ current, requests }) {
   return `You are revising an existing grant draft. Apply the team's change requests
@@ -61,7 +63,12 @@ registerIntentExecutor('revise', async (client, intent) => {
   const opp = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id));
   if (!opp?.canvas_id) { await post("There's no draft yet for this opportunity to revise."); return; }
 
-  await post('_Reading the thread…_');
+  // Same task-timeline stream the draft executor uses (live-reported: this
+  // used to fire "_Reading the thread…_" / "_Weaving in the changes…_" as
+  // two separate permanent chat messages instead of updating in place).
+  const streamer = makeThreadStreamer({ client, channel: intent.channel_id, thread_ts: intent.message_ts, userId: intent.requested_by, teamId });
+
+  await streamer.task('Reading the thread');
   const { messages = [] } = await client.conversations.replies({ channel: thread_channel, ts: thread_ts, limit: 50 });
   const requests = messages
     .filter((m) => !m.subtype && m.text)
@@ -76,7 +83,7 @@ registerIntentExecutor('revise', async (client, intent) => {
   const lastKnownDraft = recallDraft(teamId, opp_id)
     ?? '_(no cached copy of the current draft — treat the change requests as instructions for a fresh rewrite of the Draft section.)_';
 
-  await post('_Weaving in the changes…_');
+  await streamer.task('Weaving in the changes');
   const text = await completeOnce([
     { role: 'user', content: revisePrompt({ current: lastKnownDraft, requests }) },
   ], { maxTokens: 4000 });
@@ -89,9 +96,7 @@ registerIntentExecutor('revise', async (client, intent) => {
   if (updated) syncOpportunityToList(client, teamId, updated).catch(() => {});
 
   const unconfirmed = countUnconfirmed(draft);
-  await client.chat.postMessage({
-    channel: intent.channel_id, thread_ts: intent.message_ts,
-    text: `🧶 Draft updated — here's what changed:\n${diff ?? '(no summary returned)'}`
-      + (unconfirmed ? `\n\n⚠️ ${unconfirmed} spot${unconfirmed === 1 ? '' : 's'} still need${unconfirmed === 1 ? 's' : ''} the team's numbers — reply here with them and hit Apply again.` : ''),
-  });
+  const summary = `🧶 Draft updated — here's what changed:\n${diff ?? '(no summary returned)'}`
+    + (unconfirmed ? `\n\n⚠️ ${unconfirmed} spot${unconfirmed === 1 ? '' : 's'} still need${unconfirmed === 1 ? 's' : ''} the team's numbers — reply here with them and hit Apply again.` : '');
+  await streamer.stop({ blocks: [{ type: 'section', text: { type: 'mrkdwn', text: summary } }, ...buildFeedbackBlocks()] });
 });
