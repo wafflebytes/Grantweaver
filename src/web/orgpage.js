@@ -4,9 +4,20 @@
 // same no-message-content rule as the evidence_index table itself.
 import { db } from '../services/db.js';
 import { listLink } from '../services/lists.js';
+import { narrateActivity } from '../services/memories.js';
+
+const STAGE_LABEL = { suggested: 'Suggested', reviewing: 'Reviewing', drafting: 'Drafting', submitted: 'Submitted', awarded: 'Awarded', declined: 'Declined' };
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// narrateActivity (memories.js) returns Slack mrkdwn (*bold*, <@user> style
+// tags won't appear here since activity summaries don't include them) —
+// escape first, THEN convert *bold* so a title containing a literal
+// asterisk can't reopen a tag.
+function mrkdwnToHtml(s) {
+  return esc(s).replace(/\*([^*]+)\*/g, '<b>$1</b>');
 }
 
 const STRENGTH_ORDER = { star: 0, solid: 1, weak: 2 };
@@ -77,14 +88,24 @@ header.top .meta{color:var(--on-green);opacity:.85;font-size:.9rem}
 .channels a{color:var(--muted);text-decoration:underline;text-decoration-color:rgba(92,107,98,.35)}
 .hits-badge{background:rgba(212,160,23,.14);color:var(--gold);border-radius:999px;padding:2px 10px;font-size:.78rem;font-weight:600}
 @media (prefers-color-scheme:dark){.hits-badge{color:var(--gold-soft)}}
-.pipeline-card{display:flex;justify-content:space-between;align-items:center}
-.pipeline-card h2{margin:0}
-.pipeline-link{color:var(--green-deep);background:var(--gold);font-size:1.3rem;line-height:1;text-decoration:none;
-  width:46px;height:46px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
-  font-family:var(--display);transition:background .15s ease}
-.pipeline-link:hover{background:var(--gold-soft)}
-@media (prefers-color-scheme:dark){.pipeline-link{color:var(--green-deep);background:var(--gold-soft)}
-  .pipeline-link:hover{background:var(--gold)}}
+.card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.card-head h2{margin:0}
+.card-link{color:var(--gold);background:transparent;font-size:1.3rem;line-height:1;text-decoration:none;
+  width:44px;height:44px;border:2px solid var(--gold);border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--display);transition:background .15s ease;flex-shrink:0}
+.card-link:hover{background:rgba(212,160,23,.1)}
+@media (prefers-color-scheme:dark){.card-link{color:var(--gold-soft);border-color:var(--gold-soft)}
+  .card-link:hover{background:rgba(232,194,90,.1)}}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.stat-grid div{background:rgba(27,67,50,.05);border-radius:12px;padding:10px 14px}
+@media (prefers-color-scheme:dark){.stat-grid div{background:rgba(255,255,255,.04)}}
+.stat-grid b{display:block;font-family:var(--display);font-size:1.25rem;color:var(--green)}
+@media (prefers-color-scheme:dark){.stat-grid b{color:var(--gold-soft)}}
+.stat-grid span{font-size:.78rem;color:var(--muted)}
+.stage-breakdown{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.recent-activity{border-top:1px solid rgba(27,67,50,.08);padding-top:14px;margin-top:4px}
+.recent-activity h3{font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:8px;font-family:var(--body);font-weight:600}
+.recent-activity p{font-size:.9rem;margin-bottom:6px}
 .badge{font-size:.72rem;padding:2px 8px;border-radius:999px;background:rgba(45,106,79,.12)}
 footer{margin-top:32px;font-size:.82rem;color:var(--muted);text-align:center}
 footer a{color:var(--muted)}
@@ -93,20 +114,28 @@ footer a{color:var(--muted)}
 
 export async function renderOrgPage(teamId, client) {
   if (!teamId) return expiredPage();
-  const [org, index, meter] = await Promise.all([
+  const [org, index, meter, pipeline, recentActivity] = await Promise.all([
     db.getOrg(teamId), db.listIndex(teamId), db.impactMeter(teamId),
+    db.listOpportunities(teamId), db.listRecentActivity(teamId, 14),
   ]);
   if (!org) return expiredPage();
-  // The pipeline's real home is the Slack List (sortable, editable,
-  // two-way synced) — this page just points at it rather than duplicating
-  // a second, read-only copy of the same data.
-  const listUrl = client && org.pipeline_list_id ? await listLink(client, teamId, org.pipeline_list_id).catch(() => null) : null;
+  // Both Lists are now the editable, sortable, source-of-truth-mirrored
+  // views (Slack-native, two-way synced with the DB) — this page's job
+  // isn't to duplicate them row-for-row. It's the external-facing snapshot:
+  // the handful of numbers and highlights someone would actually want
+  // outside Slack (a board member, a funder, a judge who doesn't have
+  // workspace access), with a discreet link back to the real editable data
+  // for anyone who needs to act on it.
+  const [listUrl, evidenceListUrl] = await Promise.all([
+    client && org.pipeline_list_id ? listLink(client, teamId, org.pipeline_list_id).catch(() => null) : null,
+    client && org.evidence_list_id ? listLink(client, teamId, org.evidence_list_id).catch(() => null) : null,
+  ]);
 
   const themes = themeRows(index);
   const facts = org.eligibility_facts ?? {};
 
   const themeHtml = themes.length
-    ? themes.map((t) => {
+    ? themes.slice(0, 6).map((t) => {
         const pct = Math.max(6, Math.min(100, t.hits * 12));
         const uniqueChannels = [...new Set(t.channels)];
         return `<div class="theme-row">
@@ -120,6 +149,38 @@ export async function renderOrgPage(teamId, client) {
         </div>`;
       }).join('')
     : `<p class="empty">No index yet — ask Grantweaver to scan your workspace.</p>`;
+
+  const evidenceChannels = new Set(themes.flatMap((t) => t.channels)).size;
+  const evidenceStatsHtml = `<div class="stat-grid">
+    <div><b>${meter.evidence}</b><span>evidence pointers</span></div>
+    <div><b>${evidenceChannels}</b><span>channels covered</span></div>
+    <div><b>${themes.filter((t) => t.strength === 'star').length}</b><span>strong themes</span></div>
+  </div>`;
+
+  // Pipeline insight numbers — everything still in play, not the whole
+  // history (declined/awarded are outcomes, not "what's active").
+  const active = pipeline.filter((o) => !['declined', 'awarded'].includes(o.stage));
+  const totalPotential = active.reduce((sum, o) => sum + (Number(o.award_ceiling) || 0), 0);
+  const closest = active
+    .filter((o) => o.close_date)
+    .map((o) => ({ o, days: Math.ceil((new Date(o.close_date) - Date.now()) / 86400000) }))
+    .filter((x) => x.days >= 0)
+    .sort((a, b) => a.days - b.days)[0];
+  const stageCounts = active.reduce((acc, o) => { acc[o.stage] = (acc[o.stage] ?? 0) + 1; return acc; }, {});
+
+  const pipelineStatsHtml = `<div class="stat-grid">
+    <div><b>${active.length}</b><span>active opportunities</span></div>
+    <div><b>$${totalPotential.toLocaleString()}</b><span>potential funding</span></div>
+    <div><b>${closest ? `${closest.days}d` : '—'}</b><span>${closest ? esc(closest.o.title) : 'no upcoming deadline'}</span></div>
+  </div>
+  <div class="stage-breakdown">
+    ${Object.entries(stageCounts).map(([stage, n]) => `<span class="chip">${esc(STAGE_LABEL[stage] ?? stage)}: ${n}</span>`).join('') || '<span class="empty">Nothing active yet.</span>'}
+  </div>`;
+
+  const activityLines = narrateActivity(recentActivity);
+  const activityHtml = activityLines.length
+    ? `<div class="recent-activity"><h3>Recent activity</h3>${activityLines.slice(0, 5).map((l) => `<p>${mrkdwnToHtml(l)}</p>`).join('')}</div>`
+    : '';
 
   const built = org.index_built_at ? new Date(org.index_built_at).toISOString().slice(0, 10) : 'not yet';
 
@@ -147,15 +208,25 @@ export async function renderOrgPage(teamId, client) {
     </p>
   </div>
   <div class="card">
-    <h2>Evidence Index</h2>
-    <p style="color:var(--muted);font-size:.85rem;margin-bottom:6px">⭐ strong · ● solid · ○ worth building. Bar length tracks how many times each theme turned up.</p>
+    <div class="card-head">
+      <h2>Evidence Index</h2>
+      ${evidenceListUrl
+        ? `<a class="card-link" href="${esc(evidenceListUrl)}" target="_blank" rel="noopener" aria-label="Open the full evidence List" title="Open the full evidence List">↗</a>`
+        : ''}
+    </div>
+    ${evidenceStatsHtml}
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:6px">⭐ strong · ● solid · ○ worth building. Top themes — the full list lives in the List.</p>
     ${themeHtml}
   </div>
-  <div class="card pipeline-card">
-    <h2>Pipeline</h2>
-    ${listUrl
-      ? `<a class="pipeline-link" href="${esc(listUrl)}" target="_blank" rel="noopener" aria-label="Open the pipeline Slack List" title="Open the pipeline Slack List">↗</a>`
-      : `<span class="empty">List not created yet — ask Grantweaver to add an opportunity first.</span>`}
+  <div class="card">
+    <div class="card-head">
+      <h2>Pipeline</h2>
+      ${listUrl
+        ? `<a class="card-link" href="${esc(listUrl)}" target="_blank" rel="noopener" aria-label="Open the pipeline Slack List" title="Open the pipeline Slack List">↗</a>`
+        : ''}
+    </div>
+    ${pipeline.length ? pipelineStatsHtml : '<p class="empty">No pipeline yet — ask Grantweaver to find or add a grant.</p>'}
+    ${activityHtml}
   </div>
   <footer>
     Grantweaver never stores message content — this page is built from counts and links only.<br>

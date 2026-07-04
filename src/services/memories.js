@@ -12,7 +12,7 @@ const KIND_VERBS = {
   list_edit: (a) => `picked up a manual List edit on *${a.title ?? a.opp_id}*`,
 };
 
-function narrateActivity(rows) {
+export function narrateActivity(rows) {
   return rows
     .filter((a) => KIND_VERBS[a.kind])
     .slice(0, 12)
