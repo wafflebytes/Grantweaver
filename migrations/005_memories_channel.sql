@@ -1,0 +1,1 @@
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS memories_channel TEXT;

@@ -190,6 +190,7 @@ export function registerOnboarding(app) {
       state: v.state.val.selected_option?.value,
       org_size: v.size.val.selected_option?.value,
       digest_channel: v.digest.val.selected_conversation ?? null,
+      memories_channel: v.memories.val.selected_conversation ?? null,
     });
     await client.chat.postMessage({
       channel: body.user.id,
@@ -364,6 +365,9 @@ export function setupModal(org) {
       input('digest', 'Channel for the weekly grant digest',
         { type: 'conversations_select', default_to_current_conversation: true,
           filter: { include: ['public'] } }, true),
+      input('memories', 'Channel for weekly "memories" recaps (optional — try #memories)',
+        { type: 'conversations_select', filter: { include: ['public'] },
+          ...(org?.memories_channel ? { initial_conversation: org.memories_channel } : {}) }, true),
       { type: 'context', elements: [{ type: 'mrkdwn',
         text: 'This profile powers grant matching. Grantweaver stores it — and nothing from your messages.' }] },
     ],

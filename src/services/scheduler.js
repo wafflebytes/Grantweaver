@@ -5,6 +5,7 @@ import { reconcileListEdits } from './lists.js';
 import { runWatchSweep } from './watches.js';
 import { runUpdateRequestSweep } from '../surfaces/proactive.js';
 import { deadlineCard } from '../surfaces/cards.js';
+import { postMemoriesRecap } from './memories.js';
 
 export function startScheduler(app) {
   // Weekly digest — Monday 9:00 server time (per-org cron is a v2 nicety;
@@ -61,7 +62,18 @@ export function startScheduler(app) {
     await runWatchSweep(app.client).catch((e) => console.error('[watches]', e?.message ?? e));
   });
 
-  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) + daily update-requests (9:30) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
+  // Weekly memories recap — Friday 16:00, deliberately separate from
+  // Monday's digest (new matches) so it reads as "what I actually did," not
+  // another opportunities list.
+  cron.schedule('0 16 * * 5', async () => {
+    for (const org of await db.allOrgs()) {
+      if (!org.memories_channel) continue;
+      try { await postMemoriesRecap(app.client, org.team_id); }
+      catch (e) { console.error(`[memories:${org.team_id}]`, e?.message ?? e); }
+    }
+  });
+
+  console.log('[scheduler] weekly digest (Mon 9:00) + weekly memories recap (Fri 16:00) + daily deadline nudges (9:15) + daily update-requests (9:30) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
 }
 
 /** Exported for tests & manual runs. */

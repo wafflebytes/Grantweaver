@@ -7,6 +7,7 @@ import { runWatchSweep } from '../services/watches.js';
 import { runHarvestSimulate, runUpdateRequestSweep } from './proactive.js';
 import { runDeadlineSweepOnce } from '../services/scheduler.js';
 import { reconcileListEdits } from '../services/lists.js';
+import { postMemoriesRecap } from '../services/memories.js';
 
 function simulateAllowed(userId) {
   const allowed = (process.env.SIMULATE_ALLOWED_USERS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -100,6 +101,12 @@ export function registerCommands(app) {
         await postDigestNow(client, command.team_id);
         return respond({ response_type: 'ephemeral', text: '🧶 Digest posted.' });
       }
+      if (target === 'memories') {
+        const result = await postMemoriesRecap(client, command.team_id);
+        return respond({ response_type: 'ephemeral', text: result.posted
+          ? '🧶 Posted this week\'s memories recap.'
+          : 'No memories channel set — run `/grantweaver setup` and pick one.' });
+      }
       if (target === 'sync-list') {
         // Otherwise only runs on the hourly scheduler sweep — useful to force
         // right after editing the List by hand, to confirm two-way sync live
@@ -107,7 +114,7 @@ export function registerCommands(app) {
         await reconcileListEdits(client, command.team_id);
         return respond({ response_type: 'ephemeral', text: '🧶 Reconciled the pipeline List against any manual edits.' });
       }
-      return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|deadline|digest|sync-list>`' });
+      return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|deadline|digest|memories|sync-list>`' });
     }
 
     // Live feature request: a way to reset the DM for demo takes without

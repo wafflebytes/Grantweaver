@@ -64,7 +64,7 @@ export function draftReadyBlocks({ title, canvasUrl, citations }) {
 export function helpBlocks() {
   return [
     { type: 'section', text: { type: 'mrkdwn',
-      text: '*🧶 Grantweaver* — turn your conversations into funding.\n• Open my *agent panel* (✨ icon, top nav → Grantweaver) and try:\n   – _Find new grants that fit our mission_\n   – _What impact evidence do we have?_\n   – _Draft an LOI for our top opportunity_\n• `/grantweaver setup` — org profile & digest channel\n• `/grantweaver digest` — post this week\'s digest now\n• `/grantweaver clear` — clear my messages from this DM (run it in your DM with me)\n• React with :thread: on any impactful message to save it as evidence' } },
+      text: '*🧶 Grantweaver* — turn your conversations into funding.\n• Open my *agent panel* (✨ icon, top nav → Grantweaver) and try:\n   – _Find new grants that fit our mission_\n   – _What impact evidence do we have?_\n   – _Draft an LOI for our top opportunity_\n• `/grantweaver setup` — org profile & digest channel\n• `/grantweaver digest` — post this week\'s digest now\n• `/grantweaver clear` — clear my messages from this DM (run it in your DM with me)\n• Set a *#memories* channel in \`/grantweaver setup\` for a weekly highlight recap of what I actually did\n• React with :thread: on any impactful message to save it as evidence' } },
     { type: 'context', elements: [{ type: 'mrkdwn',
       text: '<https://grantweaver.app/support|Support> · <https://grantweaver.app/privacy|Privacy> · I never store your messages — pointers only.' }] },
   ];

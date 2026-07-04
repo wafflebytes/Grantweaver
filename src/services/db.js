@@ -63,15 +63,16 @@ export const db = {
     const cur = (await this.getOrg(teamId)) ?? {};
     const n = { ...cur, ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) };
     await pool.query(
-      `INSERT INTO orgs (team_id, org_name, mission, focus_areas, state, org_size, digest_channel, evidence_emoji)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'thread'))
+      `INSERT INTO orgs (team_id, org_name, mission, focus_areas, state, org_size, digest_channel, evidence_emoji, memories_channel)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'thread'),$9)
        ON CONFLICT (team_id) DO UPDATE SET
          org_name=EXCLUDED.org_name, mission=EXCLUDED.mission, focus_areas=EXCLUDED.focus_areas,
          state=EXCLUDED.state, org_size=EXCLUDED.org_size,
          digest_channel=COALESCE(EXCLUDED.digest_channel, orgs.digest_channel),
-         evidence_emoji=COALESCE(EXCLUDED.evidence_emoji, orgs.evidence_emoji)`,
+         evidence_emoji=COALESCE(EXCLUDED.evidence_emoji, orgs.evidence_emoji),
+         memories_channel=COALESCE(EXCLUDED.memories_channel, orgs.memories_channel)`,
       [teamId, n.org_name ?? null, n.mission ?? null, n.focus_areas ?? [], n.state ?? null,
-       n.org_size ?? null, n.digest_channel ?? null, n.evidence_emoji ?? null]);
+       n.org_size ?? null, n.digest_channel ?? null, n.evidence_emoji ?? null, n.memories_channel ?? null]);
   },
 
   // ── opportunities ──────────────────────────────────────────────────
@@ -189,6 +190,18 @@ export const db = {
     const { rows } = await pool.query(
       'SELECT * FROM opp_activity WHERE team_id=$1 AND opp_id=$2 ORDER BY at DESC LIMIT $3',
       [teamId, String(oppId), limit]);
+    return rows;
+  },
+  // Cross-opportunity feed for the memories recap — opp_activity is
+  // per-opp, but a recap needs "everything that happened this week"
+  // across the whole pipeline, joined back to titles for a readable line.
+  async listRecentActivity(teamId, sinceDays = 7) {
+    const { rows } = await pool.query(
+      `SELECT a.*, o.title FROM opp_activity a
+       LEFT JOIN opportunities o ON o.team_id = a.team_id AND o.opp_id = a.opp_id
+       WHERE a.team_id=$1 AND a.at > now() - ($2 || ' days')::interval
+       ORDER BY a.at DESC`,
+      [teamId, String(sinceDays)]);
     return rows;
   },
   async addSignal(teamId, { kind, subject, detail }) {
@@ -353,6 +366,12 @@ export const db = {
   async countEvidence(teamId) {
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM evidence_pointers WHERE team_id=$1', [teamId]);
+    return rows[0].n;
+  },
+  async countEvidenceSince(teamId, sinceDays) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM evidence_pointers WHERE team_id=$1 AND saved_at > now() - ($2 || ' days')::interval`,
+      [teamId, String(sinceDays)]);
     return rows[0].n;
   },
   async linkEvidenceToOpp(teamId, channelId, messageTs, oppId) {
