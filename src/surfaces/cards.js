@@ -171,7 +171,11 @@ export function draftCard({ opp, canvasUrl, citations = 0, checklistDone = 0, ch
 export function evidenceCardV2(ev, { pipeline = [] } = {}) {
   return [
     { type: 'section', text: { type: 'mrkdwn',
-      text: `🧶 *Evidence — ${ev.tag}* · <#${ev.channel_id}> · ${ev.date}\n> ${truncate(ev.snippet, 280)}\n— ${ev.author}${ev.permalink ? ` · <${ev.permalink}|View message>` : ''}` } },
+      // File hits from RTS carry no channel_id/date (Slack's search API
+      // doesn't attribute a file to a channel the way it does a message) —
+      // render "📎 file" instead of an empty <#> tag, which used to print
+      // literally as "<#>" with nothing inside it.
+      text: `🧶 *Evidence — ${ev.tag}* · ${ev.channel_id ? `<#${ev.channel_id}>` : '📎 file'}${ev.date ? ` · ${ev.date}` : ''}\n> ${truncate(ev.snippet, 280)}\n— ${ev.author}${ev.permalink ? ` · <${ev.permalink}|View message>` : ''}` } },
     {
       type: 'actions',
       elements: [

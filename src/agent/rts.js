@@ -60,7 +60,10 @@ export function normalizeRtsResult(res) {
   }));
   const fromFiles = files.map((f) => ({
     kind: 'file',
-    snippet: String(f.content ?? f.title ?? '').slice(0, 400),
+    // f.content (extracted file text) isn't always populated by Slack's
+    // search index — when it's missing, say so explicitly rather than
+    // silently substituting the filename as if it were a quoted excerpt.
+    snippet: f.content ? String(f.content).slice(0, 400) : `📎 ${f.title || 'file'} (no extracted text available — open the file to review)`,
     author: f.title ?? 'file',
     author_is_bot: false,
     channel_id: '',
