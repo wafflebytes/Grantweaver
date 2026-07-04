@@ -145,25 +145,16 @@ async function runScanAndReview(client, teamId, channel) {
 }
 
 export function registerOnboarding(app) {
-  const welcomed = new Set(); // per-process throttle; fine for demo scale
-  app.event('app_home_opened', async ({ event, client, context }) => {
-    if (event.tab !== 'messages' || welcomed.has(event.user)) return;
-    welcomed.add(event.user);
-    const org = await db.getOrg(context.teamId);
-    if (org?.mission) return;
-    await client.chat.postMessage({
-      channel: event.channel ?? event.user,
-      text: 'Welcome to Grantweaver!',
-      blocks: [
-        { type: 'section', text: { type: 'mrkdwn',
-          text: '👋 Welcome to *Grantweaver*! A quick setup unlocks funding matched to your mission — plus a scan of the evidence you already have.' } },
-        { type: 'actions', elements: [{ type: 'button', style: 'primary', action_id: 'gw:onb:start',
-          text: { type: 'plain_text', text: 'Start setup (2 min + a quick scan)' },
-          accessibility_label: 'Start conversational setup' }] },
-      ],
-    });
-  });
-
+  // The auto-posted "Start setup" welcome (on first DM open) is disabled:
+  // its free-text mission/org_name steps only correctly intercept plain
+  // top-level DM messages in assistant.js's app.message handler. A reply
+  // sent via "Reply in thread" instead falls through to the general chat
+  // loop, skipping the onboarding-state check entirely — live-caught
+  // producing a bogus "Got it — want me to scan your workspace?" reply
+  // mid-setup. `/grantweaver setup` (the org_setup modal) is now the only
+  // supported entry point; assistant.js's own greeting already points there.
+  // gw:onb:start stays registered below since the post-scan "Adjust" button
+  // (line ~295) still reuses it to restart the channel/rescan sub-flow.
   app.action('gw:onb:start', async ({ ack, body, client }) => {
     await ack();
     const teamId = body.team.id, channel = body.channel?.id ?? body.user.id;
