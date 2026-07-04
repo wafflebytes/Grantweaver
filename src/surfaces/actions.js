@@ -95,7 +95,6 @@ export function registerActions(app) {
   // in-process pending-pick maps for select-driven follow-ups (ephemeral
   // messages have no stable ts we can key intents off, so the (channel,user)
   // pair scopes a single outstanding pick — a reload just needs a re-click)
-  const pendingShare = new Map();
   const pendingOwner = new Map();
 
   async function doExportMd({ o, teamId, channel, thread_ts, requestedBy }) {
@@ -118,13 +117,24 @@ export function registerActions(app) {
     await db.setIntentMessage(intent.id, posted.ts);
   }
 
-  async function openSharePicker(client, { o, channel, user, thread_ts }) {
-    await client.chat.postEphemeral({
-      channel, user, thread_ts, text: 'Share to which channel?',
-      blocks: [{ type: 'actions', elements: [{ type: 'conversations_select', action_id: 'gw:pipe:share:pick',
-        placeholder: { type: 'plain_text', text: 'Pick a channel' }, filter: { include: ['public'] } }] }],
+  // Live-reported UX complaint: this used to post an ephemeral chat message
+  // with an inline channel picker, which reads as "the bot is talking in the
+  // channel" rather than a deliberate share action. A modal keeps the choice
+  // off-record until the user actually confirms it.
+  async function openSharePicker(client, { trigger_id, o, channel, thread_ts }) {
+    await client.views.open({
+      trigger_id,
+      view: {
+        type: 'modal', callback_id: 'gw_share_pick_submit',
+        private_metadata: JSON.stringify({ o, channel, thread_ts }),
+        title: { type: 'plain_text', text: 'Share to channel' },
+        submit: { type: 'plain_text', text: 'Share' }, close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          { type: 'input', block_id: 'target', label: { type: 'plain_text', text: 'Which channel?' },
+            element: { type: 'conversations_select', action_id: 'value', filter: { include: ['public'] } } },
+        ],
+      },
     });
-    pendingShare.set(`${channel}:${user}`, { o, thread_ts });
   }
 
   // ── Legacy Phase-1 ids — kept working, thread_ts fix applied ─────────
@@ -283,7 +293,7 @@ export function registerActions(app) {
     } else if (v === 'gw:grant:not_relevant') {
       await openNotRelevantModal(client, { trigger_id: body.trigger_id, o, channel: body.channel.id, thread_ts });
     } else if (v === 'gw:grant:share') {
-      await openSharePicker(client, { o, channel: body.channel.id, user: body.user.id, thread_ts });
+      await openSharePicker(client, { trigger_id: body.trigger_id, o, channel: body.channel.id, thread_ts });
     }
   });
 
@@ -311,22 +321,6 @@ export function registerActions(app) {
     await db.addSignal(body.team.id, { kind: 'not_relevant', subject: o, detail: otherText ? `${reason}: ${otherText}` : reason });
     await client.chat.postEphemeral({ channel, user: body.user.id, thread_ts,
       text: "Noted — I'll steer away from grants like this. I learn from every one of these." });
-  });
-
-  app.action('gw:grant:share:pick', async ({ ack, action, body, client }) => {
-    await ack();
-    const key = `${body.channel.id}:${body.user.id}`;
-    const pending = pendingShare.get(key);
-    pendingShare.delete(key);
-    if (!pending) return;
-    const target = action.selected_conversation;
-    const d = await grantsGov.fetchOpportunity(pending.o);
-    await client.chat.postMessage({
-      channel: target, text: `Shared: ${d.title}`,
-      blocks: shareCard({ title: d.title, agency: d.agency, url: `https://grants.gov/search-results-detail/${pending.o}`, sharedBy: body.user.id }),
-    }).catch((e) => console.warn('[gw:grant:share]', e?.data?.error ?? e.message));
-    await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: pending.thread_ts,
-      text: `Shared to <#${target}>. 🧶` });
   });
 
   // ── gw:pipe:* ──────────────────────────────────────────────────────
@@ -570,7 +564,7 @@ export function registerActions(app) {
     const teamId = body.team.id, channel = body.channel.id, thread_ts = replyTarget(body), requestedBy = body.user.id;
     if (v === 'gw:export:md') await doExportMd({ o, teamId, channel, thread_ts, requestedBy });
     else if (v === 'gw:export:answers') await doExportAnswers({ o, teamId, channel, thread_ts, requestedBy });
-    else if (v === 'gw:export:share') await openSharePicker(client, { o, channel, user: requestedBy, thread_ts });
+    else if (v === 'gw:export:share') await openSharePicker(client, { trigger_id: body.trigger_id, o, channel, thread_ts });
   });
 
   // ── gw:ev:* ────────────────────────────────────────────────────────
@@ -719,30 +713,28 @@ export function registerActions(app) {
   app.action('gw:export:share', async ({ ack, action, body, client }) => {
     await ack();
     const { o } = val(action);
-    await openSharePicker(client, { o, channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body) });
+    await openSharePicker(client, { trigger_id: body.trigger_id, o, channel: body.channel.id, thread_ts: replyTarget(body) });
   });
 
-  app.action('gw:pipe:share:pick', async ({ ack, action, body, client }) => {
+  // Merges what used to be two near-identical ephemeral-pick handlers
+  // (gw:grant:share:pick, gw:pipe:share:pick) now that both routes fall
+  // into the same modal — DB lookup first (has canvas/checklist context),
+  // falling back to a live Grants.gov fetch so a shared card never reads as
+  // just a bare opp_id (a live-reported bug in the old DB-miss path).
+  app.view('gw_share_pick_submit', async ({ ack, body, view, client }) => {
     await ack();
-    const key = `${body.channel.id}:${body.user.id}`;
-    const pending = pendingShare.get(key);
-    pendingShare.delete(key);
-    if (!pending) return;
+    const { o, channel, thread_ts } = JSON.parse(view.private_metadata || '{}');
+    const target = view.state.values.target.value.selected_conversation;
     const teamId = body.team.id;
-    let opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(pending.o));
-    // Live-reported bug: when the DB lookup missed, this fell back to the
-    // bare opp_id as the "title" — a shared card that reads as just a
-    // string of numbers. Fall back to a live Grants.gov fetch instead of
-    // giving up on the title.
+    let opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     if (!opp?.title) {
-      const d = await grantsGov.fetchOpportunity(pending.o).catch(() => null);
-      opp = { title: d?.title ?? `Opportunity #${pending.o}`, agency: d?.agency, url: d?.url };
+      const d = await grantsGov.fetchOpportunity(o).catch(() => null);
+      opp = { title: d?.title ?? `Opportunity #${o}`, agency: d?.agency, url: d?.url };
     }
-    const target = action.selected_conversation;
     await client.chat.postMessage({
       channel: target, text: `Shared: ${opp.title}`,
-      blocks: shareCard({ title: opp.title, agency: opp.agency, canvasUrl: opp.canvas_id ? await canvasLink(client, opp.canvas_id) : (opp.url ?? `https://grants.gov/search-results-detail/${pending.o}`), sharedBy: body.user.id }),
-    }).catch((e) => console.warn('[gw:pipe:share]', e?.data?.error ?? e.message));
-    await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: pending.thread_ts, text: `Shared to <#${target}>. 🧶` });
+      blocks: shareCard({ title: opp.title, agency: opp.agency, canvasUrl: opp.canvas_id ? await canvasLink(client, opp.canvas_id) : (opp.url ?? `https://grants.gov/search-results-detail/${o}`), sharedBy: body.user.id }),
+    }).catch((e) => console.warn('[gw:share]', e?.data?.error ?? e.message));
+    await client.chat.postEphemeral({ channel, user: body.user.id, thread_ts, text: `Shared to <#${target}>. 🧶` }).catch(() => {});
   });
 }
