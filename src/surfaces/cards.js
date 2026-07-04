@@ -11,7 +11,12 @@ function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
 // 2029 18:30:00 GMT+0000 (...)") in a card — normalize display everywhere.
 function fmtDate(v) {
   if (!v) return null;
-  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+  // pg DATE columns come back as local-midnight Dates — toISOString() shows
+  // the previous day in any UTC+ timezone; use local components instead.
+  if (v instanceof Date) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+  }
+  return String(v);
 }
 function daysUntil(dateStr) {
   return dateStr ? Math.ceil((new Date(dateStr) - Date.now()) / 86400000) : null;

@@ -43,8 +43,18 @@ export async function withRetry(fn, attempts = 3) {
 /** Deterministic intent executors and classifiers run OUTSIDE
  * the tool loop: one completion, no tools, same retry/model config. */
 export async function completeOnce(messages, { maxTokens = MAX_TOKENS, temperature = 0.2 } = {}) {
-  const response = await withRetry(() =>
+  let response = await withRetry(() =>
     getLlm().chat.completions.create({ model: MODEL, max_tokens: maxTokens, temperature, messages })
   );
+  // Reasoning models burn a non-deterministic share of max_tokens on internal
+  // chain-of-thought before the answer — a length-truncated completion here
+  // means a silently partial draft/answer, not an error. One retry with real
+  // headroom recovers almost all of these.
+  if (response.choices[0].finish_reason === 'length') {
+    console.warn('[llm] completion truncated by reasoning budget — retrying with headroom');
+    response = await withRetry(() =>
+      getLlm().chat.completions.create({ model: MODEL, max_tokens: Math.max(maxTokens * 2, 14000), temperature, messages })
+    );
+  }
   return response.choices[0].message.content ?? '';
 }

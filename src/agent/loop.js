@@ -103,12 +103,28 @@ export async function runAgentTurn(ctx) {
   }
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const response = await withRetry(() =>
+    let response = await withRetry(() =>
       getLlm().chat.completions.create({
         model: MODEL, max_tokens: MAX_TOKENS, temperature: 0.2,
         tools: OPENAI_TOOLS, messages,
       })
     );
+
+    // The model's internal reasoning competes with its answer AND its tool
+    // calls for the same max_tokens budget, non-deterministically — a
+    // length-truncated completion with no tool_calls can look exactly like a
+    // finished answer (e.g. narrating "Queued the draft" without ever emitting
+    // the create_draft_canvas call). Detect it and re-run the SAME turn once
+    // with real headroom rather than shipping a silently-degraded reply.
+    if (response.choices[0].finish_reason === 'length' && !(response.choices[0].message.tool_calls ?? []).length) {
+      console.warn('[loop] completion truncated by reasoning budget — retrying turn with headroom');
+      response = await withRetry(() =>
+        getLlm().chat.completions.create({
+          model: MODEL, max_tokens: Math.max(MAX_TOKENS * 2, 14000), temperature: 0.2,
+          tools: OPENAI_TOOLS, messages,
+        })
+      );
+    }
 
     const msg = response.choices[0].message;
     const toolUses = msg.tool_calls ?? [];

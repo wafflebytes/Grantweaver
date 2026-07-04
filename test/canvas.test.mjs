@@ -5,10 +5,11 @@ vi.mock('../src/services/db.js', () => ({
     setCanvasId: vi.fn(async () => {}),
     logActivity: vi.fn(async () => {}),
     listActivity: vi.fn(async () => [{ at: new Date('2026-07-01T00:00:00Z'), summary: 'Added to pipeline' }]),
+    listOpportunities: vi.fn(async () => [{ opp_id: '1', title: 'Test Grant', canvas_id: 'F1' }]),
   },
 }));
 
-const { sanitizeCanvasMarkdown, ensureOppCanvas, editSections, appendActivity, skeletonMarkdown } = await import('../src/services/canvas.js');
+const { sanitizeCanvasMarkdown, ensureOppCanvas, rewriteCanvas, rememberDraft, appendActivity, skeletonMarkdown } = await import('../src/services/canvas.js');
 const { db } = await import('../src/services/db.js');
 
 function fakeClient({ sectionId = 'SEC1' } = {}) {
@@ -88,28 +89,41 @@ describe('ensureOppCanvas', () => {
   });
 });
 
-describe('editSections', () => {
-  it('batches multiple section replacements into ONE canvases.edit call', async () => {
+describe('rewriteCanvas', () => {
+  it('regenerates the whole document in ONE canvases.edit replace with no section_id (the live API rejects >1 change and section-targeted replaces corrupt structure)', async () => {
     const client = fakeClient();
-    const ok = await editSections(client, 'F1', { Draft: 'new draft body', Evidence: '- [a](url)' });
+    const ok = await rewriteCanvas(client, 'T1', { opp_id: '1', title: 'Test Grant', canvas_id: 'F1', agency: 'ACYF' }, { draftMd: 'Dear officer, see [impact](https://x.slack.com/archives/C1/p1).' });
     expect(ok).toBe(true);
     const editCalls = client.calls.filter(([m]) => m === 'canvases.edit');
     expect(editCalls).toHaveLength(1);
-    expect(editCalls[0][1].changes).toHaveLength(2);
+    expect(editCalls[0][1].changes).toHaveLength(1);
+    expect(editCalls[0][1].changes[0].section_id).toBeUndefined();
+    const md = editCalls[0][1].changes[0].document_content.markdown;
+    const headings = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    expect(headings).toEqual(['Overview', 'Requirements', 'Draft', 'Evidence', 'Activity']);
+    expect(md).toContain('Dear officer');
+    expect(md).toContain('- [impact](https://x.slack.com/archives/C1/p1)'); // Evidence derived from draft citations
   });
 
-  it('skips headings that fail to resolve a section id rather than throwing', async () => {
-    const client = { apiCall: vi.fn(async (method) => {
-      if (method === 'canvases.sections.lookup') return { sections: [] };
-      return { ok: true };
-    }) };
-    const ok = await editSections(client, 'F1', { Draft: 'x' });
+  it('refuses to rewrite when a draft exists on the canvas but no in-process copy is held (never clobber)', async () => {
+    const client = fakeClient();
+    const ok = await rewriteCanvas(client, 'T1', { opp_id: 'other', canvas_id: 'F1', canvas_written_at: new Date() });
     expect(ok).toBe(false);
+    expect(client.calls.filter(([m]) => m === 'canvases.edit')).toHaveLength(0);
+  });
+
+  it('uses the remembered draft when no explicit draftMd is passed', async () => {
+    const client = fakeClient();
+    rememberDraft('T1', '9', 'remembered draft body');
+    const ok = await rewriteCanvas(client, 'T1', { opp_id: '9', canvas_id: 'F1', canvas_written_at: new Date() });
+    expect(ok).toBe(true);
+    const [, args] = client.calls.find(([m]) => m === 'canvases.edit');
+    expect(args.changes[0].document_content.markdown).toContain('remembered draft body');
   });
 });
 
 describe('appendActivity', () => {
-  it('replaces the Activity section from the DB activity trail', async () => {
+  it('refreshes the Activity section from the DB activity trail via a full rewrite', async () => {
     const client = fakeClient();
     await appendActivity(client, 'F1', 'T1', '1');
     const editCall = client.calls.find(([m]) => m === 'canvases.edit');

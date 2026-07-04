@@ -3,7 +3,7 @@
 // wording); "Apply changes" reads the whole thread once and runs ONE
 // completion. Registers the 'revise' intent executor.
 import { db } from '../services/db.js';
-import { editSections, appendActivity } from '../services/canvas.js';
+import { rewriteCanvas, recallDraft } from '../services/canvas.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { completeOnce } from './llm.js';
 import { registerIntentExecutor } from './intents.js';
@@ -73,7 +73,7 @@ registerIntentExecutor('revise', async (client, intent) => {
   // never a version we can't verify; a human-hand-edited Draft since our
   // last write is preserved as-is unless the thread explicitly asks to
   // change what's already there (same caution the branch decision calls for).
-  const lastKnownDraft = intent.params.lastDraft
+  const lastKnownDraft = recallDraft(teamId, opp_id)
     ?? '_(no cached copy of the current draft — treat the change requests as instructions for a fresh rewrite of the Draft section.)_';
 
   await post('_Weaving in the changes…_');
@@ -82,11 +82,10 @@ registerIntentExecutor('revise', async (client, intent) => {
   ], { maxTokens: 4000 });
   const { draft, diff } = parseRevision(text);
 
-  await editSections(client, opp.canvas_id, { Draft: draft });
   await db.setCanvasWritten(teamId, opp_id);
   await db.logActivity(teamId, opp_id, { actor: intent.requested_by, kind: 'revision', summary: 'Draft revised from thread requests' });
-  await appendActivity(client, opp.canvas_id, teamId, opp_id).catch(() => {});
   const updated = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id));
+  await rewriteCanvas(client, teamId, updated ?? opp, { draftMd: draft });
   if (updated) syncOpportunityToList(client, teamId, updated).catch(() => {});
 
   const unconfirmed = countUnconfirmed(draft);

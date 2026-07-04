@@ -6,7 +6,7 @@
 // avoiding a circular import from here); 'revise' and 'rescan' arrive with
 // their features.
 import { db } from '../services/db.js';
-import { ensureOppCanvas, editSections, appendActivity } from '../services/canvas.js';
+import { ensureOppCanvas, rewriteCanvas } from '../services/canvas.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { draftCard } from '../surfaces/cards.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';
@@ -135,18 +135,14 @@ registerIntentExecutor('draft', async (client, intent) => {
 
   const citations = [...markdown.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]*archives[^)]*)\)/g)];
   let opp = opp_id ? (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id)) : null;
-  const evidenceMd = citations.length
-    ? citations.map((m) => `- [${m[1]}](${m[2]})`).join('\n')
-    : '_(none cited yet)_';
 
   // The canvas is per-opportunity and PERSISTENT — ensureOppCanvas creates it
   // once (on first draft or earlier at add-time) and every later draft/revise
-  // writes into the SAME canvas's Draft section, never a new document.
+  // regenerates the SAME canvas in place, never a new document.
   const { canvasId, canvasUrl } = await ensureOppCanvas(client, teamId, {
     ...(opp ?? { opp_id, title, channelId: intent.channel_id, userId: intent.requested_by }),
     channelId: intent.channel_id, userId: intent.requested_by,
   });
-  await editSections(client, canvasId, { Draft: markdown, Evidence: evidenceMd });
 
   if (opp_id) {
     await db.attachCanvas(teamId, opp_id, canvasId);
@@ -155,9 +151,13 @@ registerIntentExecutor('draft', async (client, intent) => {
       await db.toggleChecklistItem(teamId, opp_id, 'narrative', true);
     }
     await db.logActivity(teamId, opp_id, { actor: intent.requested_by, kind: 'draft', summary: `Draft written: ${citations.length} citation${citations.length === 1 ? '' : 's'}` });
-    await appendActivity(client, canvasId, teamId, opp_id).catch(() => {});
     opp = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id));
-    if (opp) syncOpportunityToList(client, teamId, opp).catch(() => {});
+    if (opp) {
+      await rewriteCanvas(client, teamId, opp, { draftMd: markdown }).catch((e) => console.warn('[intent:draft] canvas rewrite failed:', e?.data?.error ?? e?.message));
+      syncOpportunityToList(client, teamId, opp).catch(() => {});
+    }
+  } else {
+    await rewriteCanvas(client, teamId, { opp_id, title, canvas_id: canvasId }, { draftMd: markdown }).catch((e) => console.warn('[intent:draft] canvas rewrite failed:', e?.data?.error ?? e?.message));
   }
   const checklist = opp?.checklist ?? [];
   const done = checklist.filter((c) => c.done).length;

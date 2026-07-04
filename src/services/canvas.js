@@ -1,8 +1,8 @@
 import { db } from './db.js';
 
-// Every opportunity canvas is created with EXACTLY these H2 sections, in this
-// order, forever — canvases.sections.lookup finds them by heading text, so
-// the headings themselves are a contract the agent may never restructure.
+// Every opportunity canvas carries EXACTLY these H2 sections, in this order,
+// forever — the whole document is regenerated in place by rewriteCanvas, so
+// the headings are a rendering contract, not lookup targets.
 const SECTION_HEADINGS = ['Overview', 'Requirements', 'Draft', 'Evidence', 'Activity'];
 
 function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
@@ -10,7 +10,12 @@ function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
 // as a JS Date; interpolating it directly renders its ugly toString().
 function fmtDate(v) {
   if (!v) return null;
-  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+  // pg DATE columns come back as local-midnight Dates — toISOString() shows
+  // the previous day in any UTC+ timezone; use local components instead.
+  if (v instanceof Date) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+  }
+  return String(v);
 }
 
 function overviewMarkdown(opp) {
@@ -58,6 +63,61 @@ export async function ensureOppCanvas(client, teamId, opp) {
   return { canvasId, canvasUrl };
 }
 
+// Last Draft-section markdown WE wrote, per (team, opp). Same content-at-rest
+// rule as the intent draft stash: a draft quotes Slack content verbatim by
+// design, so this lives in-process ONLY, never the DB. After a restart it's
+// empty — rewriteCanvas then refuses to touch a canvas whose draft it can't
+// reproduce, rather than ever clobbering the team's document.
+const lastDraftByOpp = new Map();
+export function rememberDraft(teamId, oppId, markdown) {
+  lastDraftByOpp.set(`${teamId}:${oppId}`, markdown);
+}
+export function recallDraft(teamId, oppId) {
+  return lastDraftByOpp.get(`${teamId}:${oppId}`) ?? null;
+}
+
+function evidenceMarkdown(draftMd) {
+  const citations = [...String(draftMd ?? '').matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]*archives[^)]*)\)/g)];
+  return citations.length ? citations.map((m) => `- [${m[1]}](${m[2]})`).join('\n') : '_(none cited yet)_';
+}
+
+function fullMarkdown(opp, { draftMd, activityRows }) {
+  return [
+    '## Overview', overviewMarkdown(opp),
+    '## Requirements', requirementsMarkdown(opp.checklist),
+    '## Draft', draftMd ?? '_Not started — ask me to draft when ready._',
+    '## Evidence', evidenceMarkdown(draftMd),
+    '## Activity', activityMarkdown(activityRows),
+  ].join('\n\n');
+}
+
+/**
+ * Regenerate the ENTIRE canvas from DB truth + the in-process draft copy, in
+ * one canvases.edit whole-document replace. Section-targeted editing is a
+ * dead end (live-confirmed): sections.lookup matches only the heading BLOCK,
+ * a replace on it destroys the heading and orphans the old body paragraphs
+ * below as duplicates, and there is no way to enumerate or read body blocks.
+ * Branch B makes full regeneration safe — every section is derivable from the
+ * DB except Draft, which we hold in-process (rememberDraft) from the moment
+ * we write it. The one guarded case: a draft exists on the canvas but this
+ * process never wrote it (restart) — then we SKIP rather than clobber it.
+ */
+export async function rewriteCanvas(client, teamId, opp, { draftMd } = {}) {
+  if (!opp?.canvas_id) return false;
+  const draft = draftMd ?? recallDraft(teamId, opp.opp_id);
+  if (!draft && opp.canvas_written_at) {
+    console.warn(`[canvas] skip rewrite of ${opp.canvas_id} — draft exists but no in-process copy (restart?)`);
+    return false;
+  }
+  const activityRows = await db.listActivity(teamId, opp.opp_id, 10).catch(() => []);
+  await client.apiCall('canvases.edit', {
+    canvas_id: opp.canvas_id,
+    changes: [{ operation: 'replace', document_content: { type: 'markdown', markdown: sanitizeCanvasMarkdown(fullMarkdown(opp, { draftMd: draft, activityRows })) } }],
+  });
+  if (draftMd) rememberDraft(teamId, opp.opp_id, draftMd);
+  return true;
+}
+
 /**
  * Branch B means Overview/Requirements are agent-owned and safe to
  * regenerate from DB truth any time (unlike Draft, which only changes via
@@ -65,40 +125,13 @@ export async function ensureOppCanvas(client, teamId, opp) {
  * checklist/stage on an opp that already has a canvas.
  */
 export async function refreshOverviewAndRequirements(client, teamId, opp) {
-  if (!opp?.canvas_id) return false;
-  return editSections(client, opp.canvas_id, {
-    Overview: overviewMarkdown(opp),
-    Requirements: requirementsMarkdown(opp.checklist),
-  });
+  return rewriteCanvas(client, teamId, opp);
 }
 
-/** Replace one H2 section's body. Looks the section up by heading text every call (ids aren't cached — cheap, and survives a human reordering nothing since headings are a contract). */
-export async function editSection(client, canvasId, heading, markdown) {
-  const sectionId = await lookupSection(client, canvasId, heading);
-  if (!sectionId) return false;
-  await client.apiCall('canvases.edit', {
-    canvas_id: canvasId,
-    changes: [{ operation: 'replace', section_id: sectionId, document_content: { type: 'markdown', markdown } }],
-  });
-  return true;
-}
-
-/** Batch multiple section replacements into ONE canvases.edit call (rate-budget friendly). */
-export async function editSections(client, canvasId, sectionsByHeading) {
-  const changes = [];
-  for (const [heading, markdown] of Object.entries(sectionsByHeading)) {
-    const sectionId = await lookupSection(client, canvasId, heading);
-    if (sectionId) changes.push({ operation: 'replace', section_id: sectionId, document_content: { type: 'markdown', markdown } });
-  }
-  if (!changes.length) return false;
-  await client.apiCall('canvases.edit', { canvas_id: canvasId, changes });
-  return true;
-}
-
-/** No live per-section append method exists — replace the whole Activity section from the DB's own trail (our own wording, never Slack content). */
+/** Refresh the Activity section from the DB's own trail (our own wording, never Slack content). */
 export async function appendActivity(client, canvasId, teamId, oppId) {
-  const rows = await db.listActivity(teamId, oppId, 10);
-  return editSection(client, canvasId, 'Activity', activityMarkdown(rows));
+  const opp = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(oppId));
+  return rewriteCanvas(client, teamId, opp);
 }
 
 /**
@@ -113,19 +146,6 @@ export async function appendActivity(client, canvasId, teamId, oppId) {
  */
 export async function readCanvas() {
   return null;
-}
-
-async function lookupSection(client, canvasId, heading) {
-  try {
-    const { sections } = await client.apiCall('canvases.sections.lookup', {
-      canvas_id: canvasId,
-      criteria: { contains_text: heading },
-    });
-    return sections?.[0]?.id ?? null;
-  } catch (e) {
-    console.warn('[canvas:lookup]', e?.data?.error ?? e.message);
-    return null;
-  }
 }
 
 async function rebuildCanvasUrl(client, canvasId) {
