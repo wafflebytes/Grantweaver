@@ -78,7 +78,7 @@ export const app = new App({
       handler: async (req, res) => {
         const token = req.params?.token ?? new URL(req.url, 'http://x').searchParams.get('t');
         const verified = token ? verifyOrgToken(token) : null;
-        const html = await renderOrgPage(verified?.teamId ?? null);
+        const html = await renderOrgPage(verified?.teamId ?? null, app.client);
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         res.end(html);
       },

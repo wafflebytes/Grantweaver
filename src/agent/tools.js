@@ -372,6 +372,27 @@ export function buildToolbelt(ctx) {
   };
 }
 
+// grantsgov-server.mjs's cleanText already strips HTML entities from
+// titles/agencies it fetches fresh — but this tool's 'add' action takes
+// opp.title straight from the MODEL's tool-call arguments (it composes
+// this from whatever it saw earlier in context, which isn't guaranteed to
+// have gone through that cleaning), so a raw "&nbsp;"-laden Grants.gov
+// title could reach the DB and then the Home tab verbatim (live-reported).
+// Clean defensively here regardless of source.
+function sanitizeText(v) {
+  if (v == null) return v;
+  return String(v)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Shared add-to-pipeline path (tools.js `pipeline` add AND actions.js's
  * gw:grant:add button both call this — one place owns fit/checklist/canvas
@@ -379,6 +400,7 @@ export function buildToolbelt(ctx) {
  * failures degrade the add, they don't block it.
  */
 export async function addOpportunityFull(client, teamId, opp) {
+  opp = { ...opp, title: sanitizeText(opp.title), agency: sanitizeText(opp.agency) };
   await db.addOpportunity(teamId, opp);
   if (opp.owner_user_id) await db.setOwner(teamId, opp.opp_id, opp.owner_user_id);
   const org = await db.getOrg(teamId);

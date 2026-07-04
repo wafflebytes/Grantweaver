@@ -3,7 +3,7 @@
 // tokens so it reads as the same product. Data is counts+links only — the
 // same no-message-content rule as the evidence_index table itself.
 import { db } from '../services/db.js';
-import { fmtDate } from '../surfaces/cards.js';
+import { listLink } from '../services/lists.js';
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -76,12 +76,16 @@ footer a{color:var(--muted)}
 .empty{color:var(--muted);font-style:italic}
 </style>`;
 
-export async function renderOrgPage(teamId) {
+export async function renderOrgPage(teamId, client) {
   if (!teamId) return expiredPage();
-  const [org, index, pipeline, meter] = await Promise.all([
-    db.getOrg(teamId), db.listIndex(teamId), db.listOpportunities(teamId), db.impactMeter(teamId),
+  const [org, index, meter] = await Promise.all([
+    db.getOrg(teamId), db.listIndex(teamId), db.impactMeter(teamId),
   ]);
   if (!org) return expiredPage();
+  // The pipeline's real home is the Slack List (sortable, editable,
+  // two-way synced) — this page just points at it rather than duplicating
+  // a second, read-only copy of the same data.
+  const listUrl = client && org.pipeline_list_id ? await listLink(client, teamId, org.pipeline_list_id).catch(() => null) : null;
 
   const themes = themeRows(index);
   const facts = org.eligibility_facts ?? {};
@@ -97,14 +101,6 @@ export async function renderOrgPage(teamId) {
         </div>`;
       }).join('')
     : `<p class="empty">No index yet — ask Grantweaver to scan your workspace.</p>`;
-
-  const pipelineHtml = pipeline.length
-    ? pipeline.slice(0, 10).map((o) => `<div class="pipeline-row">
-        <span>${esc(o.title)}</span>
-        <span><span class="badge">${esc(o.stage)}</span> ${o.fit_score != null ? `· fit ${o.fit_score}/100` : ''} · ${o.close_date ? esc(fmtDate(o.close_date)) : 'rolling'}
-        ${o.checklist?.length ? `· ${o.checklist.filter((c) => c.done).length}/${o.checklist.length}` : ''}</span>
-      </div>`).join('')
-    : `<p class="empty">No pipeline yet.</p>`;
 
   const built = org.index_built_at ? new Date(org.index_built_at).toISOString().slice(0, 10) : 'not yet';
 
@@ -136,9 +132,11 @@ export async function renderOrgPage(teamId) {
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:6px">⭐ strong · ● solid · ○ worth building. Bar length tracks how many times each theme turned up.</p>
     ${themeHtml}
   </div>
-  <div class="card">
-    <h2>Pipeline</h2>
-    ${pipelineHtml}
+  <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+    <h2 style="margin:0">Pipeline</h2>
+    ${listUrl
+      ? `<a href="${esc(listUrl)}" target="_blank" rel="noopener">Pipeline ↗</a>`
+      : `<span class="empty">List not created yet — ask Grantweaver to add an opportunity first.</span>`}
   </div>
   <footer>
     Grantweaver never stores message content — this page is built from counts and links only.<br>
