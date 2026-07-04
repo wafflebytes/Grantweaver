@@ -5,6 +5,7 @@
 import { runAgentTurn } from './agent/loop.js';
 import { makeDmStreamer } from './agent/streamer.js';
 import { db } from './services/db.js';
+import { handleOnboardingAnswer } from './surfaces/onboarding.js';
 
 const LOADING = [
   'Searching your workspace threads…',
@@ -79,6 +80,16 @@ export function registerAssistant(app) {
     const eventAgeMs = message.ts ? t0 - Number(message.ts) * 1000 : null;
     console.log(`[diag] handler start, event age ${eventAgeMs}ms (message.ts=${message.ts})`);
     try {
+      // Onboarding's free-text steps (mission, org_name) take over the DM
+      // entirely — zero LLM involvement, keeps the agent loop untouched.
+      const teamId = message.team ?? context.teamId;
+      const org = teamId ? await db.getOrg(teamId) : null;
+      const onboardingStep = org?.onboarding_state?.step;
+      if (onboardingStep === 'mission' || onboardingStep === 'org_name') {
+        await handleOnboardingAnswer(client, { teamId, channel, userId: message.user, text: message.text ?? '', org });
+        return;
+      }
+
       // Fire-and-forget: setStatus is a Slack API round-trip purely for the
       // loading-indicator UX. Awaiting it here would burn into the
       // action_token's short TTL before the turn (and its evidence prefetch)

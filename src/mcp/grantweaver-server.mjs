@@ -44,6 +44,24 @@ function buildServer(fixedTeamId) {
     { keyword: z.string(), rows: z.number().int().max(15).default(8) },
     async ({ keyword, rows }) => text({ opportunities: await grantsGov.search({ keyword, rows }) }));
 
+  server.tool('list_watches',
+    "List a workspace's standing grant watches (query/agency/opp).",
+    { team_id: z.string().optional() },
+    async ({ team_id }) => text({
+      watches: (await db.listWatches(resolveTeamId(team_id))).map((w) => ({
+        id: w.id, kind: w.kind, params: w.params, last_run_at: w.last_run_at,
+      })),
+    }));
+
+  server.tool('get_checklist',
+    'Application requirements checklist for one pipeline opportunity, with completion state.',
+    { team_id: z.string().optional(), opp_id: z.string() },
+    async ({ team_id, opp_id }) => {
+      const opp = (await db.listOpportunities(resolveTeamId(team_id))).find((o) => o.opp_id === String(opp_id));
+      if (!opp) return text({ error: 'opportunity not found' });
+      return text({ title: opp.title, checklist: opp.checklist ?? [] });
+    });
+
   server.tool('get_impact_meter',
     "A workspace's Grantweaver impact stats: opportunities surfaced, dollars applied for, evidence items, estimated hours saved.",
     { team_id: z.string().optional() },

@@ -67,6 +67,99 @@ date (LOI due, webinar).
 ONLY JSON: [{"id":"narrative","label":"Project narrative","kind":"document","detail":"max 10 pages","due_hint":null}]`;
 }
 
+export function themePrompt(scanResults) {
+  const rows = scanResults.map((r) => [
+    `query: ${r.query_label}`, `channel_id: ${r.channel_id}`, `channel_name: ${r.channel_name}`,
+    `permalink: ${r.permalink}`, `is_file: ${!!r.is_file}`, `snippet: ${truncate(r.snippet, 300)}`,
+  ].join(' | ')).join('\n');
+
+  return `You are indexing a nonprofit's Slack workspace for grant-writing evidence.
+Group these search results into 3-8 THEMES a funder would recognize
+(e.g. "attendance & academic outcomes", "parent & teacher testimonials",
+"program reach & volume", "events & community presence").
+
+INPUT: search results as {query_label, channel_id, channel_name, permalink,
+snippet, is_file} — snippets are for YOUR EYES ONLY to classify; they are
+never stored.
+${rows || '(no results)'}
+
+For each (theme × channel) pair with ≥1 hit return:
+- theme: 2-5 word label, funder vocabulary, lowercase
+- channel_id, channel_name
+- strength: "star" = specific numbers or named quotable outcomes; "solid" =
+  concrete but unquantified; "weak" = mentions without substance
+- permalinks: up to 5 strongest
+- has_files: true if any hit is a file
+
+ONLY JSON: [{"theme":"…","channel_id":"…","channel_name":"…","strength":"star","permalinks":["…"],"has_files":false}]`;
+}
+
+/** ONE LLM call for the whole scan. Never throws — callers degrade to a heuristic theme-per-query-label grouping. */
+export async function classifyThemes(scanResults) {
+  if (!scanResults.length) return [];
+  try {
+    const parsed = await completeWithReasoningHeadroom(
+      [{ role: 'user', content: themePrompt(scanResults) }], 0,
+    );
+    if (!parsed) return null; // signals "classifier down" — caller degrades
+    return parsed
+      .filter((r) => r && r.theme && r.channel_id)
+      .map((r) => ({
+        theme: String(r.theme).slice(0, 80),
+        channel_id: String(r.channel_id),
+        channel_name: r.channel_name ? String(r.channel_name).slice(0, 80) : null,
+        strength: ['weak', 'solid', 'star'].includes(r.strength) ? r.strength : 'solid',
+        permalinks: Array.isArray(r.permalinks) ? r.permalinks.slice(0, 5).map(String) : [],
+        has_files: !!r.has_files,
+      }));
+  } catch (e) {
+    console.warn('[classifiers:theme] falling back to heuristic —', e?.message ?? e);
+    return null;
+  }
+}
+
+export function harvestPrompt(text, pipeline) {
+  const openGrants = (pipeline ?? [])
+    .filter((o) => ['drafting', 'reviewing'].includes(o.stage))
+    .map((o) => `${o.opp_id} ${o.title}`).join('\n') || '(none open)';
+  return `A message was just posted in a nonprofit's Slack channel. Decide if it is
+grant-worthy IMPACT EVIDENCE: concrete results, metrics, testimonials,
+milestones, or documentation of program work. Routine chatter, questions,
+logistics, and plans are NOT evidence.
+
+MESSAGE: ${truncate(text, 600)}
+OPEN GRANTS (for linking): ${openGrants}
+
+ONLY JSON: {"is_evidence":true,"tag":"metric|story|testimonial|other",
+"opp_id_hint":"opp_id or null","why":"≤80 chars"}
+When unsure, is_evidence=false — a wrong nudge erodes trust fast.`;
+}
+
+function parseJsonObject(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
+/** ONE LLM call per harvested message. Never throws — callers fall back to heuristic-only (already-passed guard chain = is_evidence). */
+export async function classifyHarvest(text, pipeline) {
+  try {
+    const parsed = parseJsonObject(await completeOnce(
+      [{ role: 'user', content: harvestPrompt(text, pipeline) }], { temperature: 0, maxTokens: 300 },
+    ));
+    if (!parsed) return null;
+    return {
+      is_evidence: !!parsed.is_evidence,
+      tag: ['metric', 'story', 'testimonial', 'other'].includes(parsed.tag) ? parsed.tag : 'other',
+      opp_id_hint: parsed.opp_id_hint ? String(parsed.opp_id_hint) : null,
+      why: parsed.why ? String(parsed.why).slice(0, 100) : '',
+    };
+  } catch (e) {
+    console.warn('[classifiers:harvest] falling back —', e?.message ?? e);
+    return null;
+  }
+}
+
 function parseJsonArray(text) {
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) return null;

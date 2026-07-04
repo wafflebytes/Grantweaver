@@ -1,4 +1,5 @@
 import { db } from '../services/db.js';
+import { orgLinkUrl } from '../services/weblink.js';
 
 const STAGES = [
   ['suggested', '🌱 Suggested'], ['reviewing', '🔍 Reviewing'], ['drafting', '✍️ Drafting'],
@@ -22,6 +23,11 @@ export function registerHome(app) {
     await db.moveOpportunity(body.team.id, oppId, stage);
     await publishHome(client, body.team.id, body.user.id);
   });
+
+  app.action('gw:home:index', async ({ ack, body, client }) => {
+    await ack();
+    await client.chat.postMessage({ channel: body.user.id, text: `🧶 Your evidence index: ${orgLinkUrl(body.team.id)}` });
+  });
 }
 
 export async function publishHome(client, teamId, userId) {
@@ -40,6 +46,8 @@ export async function publishHome(client, teamId, userId) {
       { type: 'button', action_id: 'open_assistant_hint', style: 'primary',
         text: { type: 'plain_text', text: '💬 Ask Grantweaver' },
         accessibility_label: 'How to open the Grantweaver agent panel' },
+      { type: 'button', action_id: 'gw:home:index', text: { type: 'plain_text', text: '📄 Evidence index' },
+        accessibility_label: 'DM me the link to the web evidence index' },
     ]},
     { type: 'section', text: { type: 'mrkdwn',
       text: `*This quarter:* ${meter.surfaced} opportunities surfaced · $${meter.applied.toLocaleString()} applied for · ${meter.evidence} evidence items woven · est. *${meter.hoursSaved} hrs saved*` } },

@@ -9,9 +9,12 @@ import { registerActions } from './surfaces/actions.js';
 import { registerMention } from './surfaces/mention.js';
 import { registerUnfurl } from './surfaces/unfurl.js';
 import { registerShortcuts } from './surfaces/shortcuts.js';
+import { registerProactive } from './surfaces/proactive.js';
 import { startScheduler } from './services/scheduler.js';
 import { db } from './services/db.js';
 import { handleMcpRequest } from './mcp/grantweaver-server.mjs';
+import { verifyOrgToken } from './services/weblink.js';
+import { renderOrgPage } from './web/orgpage.js';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 
@@ -57,6 +60,20 @@ export const app = new App({
     // One Railway service, one port, one TLS cert — grantweaver-mcp mounts
     // here instead of running as a second process/port in prod.
     { path: '/mcp', method: ['POST'], handler: handleMcpRequest },
+    {
+      // Bolt's HTTPReceiver router supports :param segments (verified live
+      // locally). Falls back to ?t= if a param ever arrives unmatched —
+      // verifyOrgToken doesn't care which transport handed it the token.
+      path: '/org/:token',
+      method: ['GET'],
+      handler: async (req, res) => {
+        const token = req.params?.token ?? new URL(req.url, 'http://x').searchParams.get('t');
+        const verified = token ? verifyOrgToken(token) : null;
+        const html = await renderOrgPage(verified?.teamId ?? null);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(html);
+      },
+    },
     sitePage('index.html', '/'),
     sitePage('index.html'),
     sitePage('privacy.html'),
@@ -75,6 +92,7 @@ registerActions(app);
 registerMention(app);
 registerUnfurl(app);
 registerShortcuts(app);
+registerProactive(app);
 
 app.error(async (error) => {
   // Never crash on a handler error; never leak stack traces to users.

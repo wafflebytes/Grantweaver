@@ -229,6 +229,9 @@ export const db = {
   async clearIndex(teamId) {
     await pool.query('DELETE FROM evidence_index WHERE team_id=$1', [teamId]);
   },
+  async markIndexBuilt(teamId) {
+    await pool.query('UPDATE orgs SET index_built_at=now() WHERE team_id=$1', [teamId]);
+  },
 
   // ── pending intents (confirm-before-generate) ─────────────────────
   async createIntent(teamId, { kind, params, requested_by, channel_id }) {

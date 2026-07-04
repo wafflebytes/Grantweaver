@@ -3,6 +3,8 @@ import { db } from './db.js';
 import { postDigestNow } from './digest.js';
 import { reconcileListEdits } from './lists.js';
 import { runWatchSweep } from './watches.js';
+import { runUpdateRequestSweep } from '../surfaces/proactive.js';
+import { deadlineCard } from '../surfaces/cards.js';
 
 export function startScheduler(app) {
   // Weekly digest — Monday 9:00 server time (per-org cron is a v2 nicety;
@@ -14,7 +16,7 @@ export function startScheduler(app) {
     }
   });
 
-  // Daily deadline nudges — 9:15, T-14 / T-7 / T-2
+  // Daily deadline nudges — 9:15, T-14 / T-7 / T-2 (snooze-aware, upgraded card)
   cron.schedule('15 9 * * *', async () => {
     for (const org of await db.allOrgs()) {
       if (!org.digest_channel) continue;
@@ -23,12 +25,19 @@ export function startScheduler(app) {
         if (!o.close_date || ['submitted', 'awarded', 'declined'].includes(o.stage)) continue;
         const days = Math.ceil((new Date(o.close_date) - Date.now()) / 86400000);
         if (![14, 7, 2].includes(days)) continue;
+        const snoozedFor = await db.countSignalsSince(org.team_id, 'nudge_posted', `deadline:${o.opp_id}`, 72);
+        if (snoozedFor > 0) continue;
         await app.client.chat.postMessage({
-          channel: org.digest_channel,
-          text: `⏰ *${o.title}* is due in *${days} days*. Stage: ${o.stage}. Open my agent panel and ask me to draft or finalize.`,
+          channel: org.digest_channel, text: `⏰ ${o.title} is due in ${days} days.`,
+          blocks: deadlineCard(o, days),
         }).catch((e) => console.error('[reminder]', e?.data?.error ?? e?.message));
       }
     }
+  });
+
+  // Update requests — daily 9:30
+  cron.schedule('30 9 * * *', async () => {
+    await runUpdateRequestSweep(app.client).catch((e) => console.error('[update-requests]', e?.message ?? e));
   });
 
   // Intent expiry: a confirm card nobody ever clicked shouldn't
@@ -52,7 +61,7 @@ export function startScheduler(app) {
     await runWatchSweep(app.client).catch((e) => console.error('[watches]', e?.message ?? e));
   });
 
-  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
+  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) + daily update-requests (9:30) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
 }
 
 /** Exported for tests & manual runs. */
@@ -65,7 +74,7 @@ export async function runDeadlineSweepOnce(client) {
       const days = Math.ceil((new Date(o.close_date) - Date.now()) / 86400000);
       if ([14, 7, 2].includes(days)) {
         await client.chat.postMessage({ channel: org.digest_channel,
-          text: `⏰ *${o.title}* is due in *${days} days*.` });
+          text: `⏰ ${o.title} is due in ${days} days.`, blocks: deadlineCard(o, days) });
       }
     }
   }
