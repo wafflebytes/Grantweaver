@@ -340,7 +340,7 @@ export const db = {
          tag=EXCLUDED.tag,
          permalink=CASE WHEN EXCLUDED.permalink <> '' THEN EXCLUDED.permalink ELSE evidence_pointers.permalink END,
          is_file=evidence_pointers.is_file OR EXCLUDED.is_file
-       RETURNING (xmax = 0) AS inserted`,
+       RETURNING (xmax = 0) AS inserted, list_item_id`,
       [teamId, ptr.channel_id, ptr.message_ts, ptr.permalink ?? '', ptr.tag ?? 'story', ptr.saved_by ?? null, ptr.is_file ?? false]);
     // Close the loop: a human's manual save now strengthens the SAME evidence
     // index the org page renders, instead of only bumping an invisible
@@ -353,6 +353,10 @@ export const db = {
         channel_id: ptr.channel_id, permalink: ptr.permalink, is_file: ptr.is_file ?? false,
       });
     }
+    // Callers pass this straight to lists.syncEvidenceToList so a re-save
+    // (e.g. the message shortcut used twice) UPDATEs the existing List row
+    // instead of creating a duplicate — same shape as opportunities.list_item_id.
+    return { listItemId: rows[0]?.list_item_id ?? null };
   },
   async bumpIndexFromEvidence(teamId, { theme, channel_id, permalink, is_file }) {
     const { rows } = await pool.query(

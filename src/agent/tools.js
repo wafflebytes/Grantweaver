@@ -337,9 +337,9 @@ export function buildToolbelt(ctx) {
       if (!teamId) return { error: 'No team context' };
       if (action === 'list') return { pointers: await db.listEvidence(teamId) };
       if (!channel_id || !message_ts) return { error: 'save requires channel_id and message_ts' };
-      await db.saveEvidence(teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, saved_by: userId });
+      const { listItemId } = await db.saveEvidence(teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, saved_by: userId });
       const channelInfo = await client.conversations.info({ channel: channel_id }).catch(() => null);
-      syncEvidenceToList(client, teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, channel_name: channelInfo?.channel?.name }).catch(() => {});
+      syncEvidenceToList(client, teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId }).catch(() => {});
       return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored).' };
     },
 

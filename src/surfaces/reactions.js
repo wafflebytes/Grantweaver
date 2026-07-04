@@ -18,10 +18,10 @@ export async function saveEvidenceFromMessage(client, { teamId, channel, ts, use
     detectFileMessage(client, channel, ts),
     client.conversations.info({ channel }).catch(() => null),
   ]);
-  await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile, saved_by: userId });
+  const { listItemId } = await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile, saved_by: userId });
   syncEvidenceToList(client, teamId, {
     channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile,
-    channel_name: channelInfo?.channel?.name,
+    channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
   }).catch(() => {});
   return {
     permalink,
