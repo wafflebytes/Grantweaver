@@ -144,6 +144,72 @@ export async function syncOpportunityToList(client, teamId, opp, canvasUrl) {
   }
 }
 
+// Second List use case, same pattern as the pipeline one: the curated
+// evidence locker (📌-tagged, human-saved pointers — see db.saveEvidence's
+// compliance guard) as a sortable table, complementing the web org page's
+// theme-grouped view rather than replacing it.
+const EVIDENCE_COLUMN_DEFS = [
+  { key: 'summary', name: 'Evidence', type: 'text', is_primary_column: true },
+  {
+    key: 'tag', name: 'Type', type: 'select',
+    options: { choices: ['metric', 'story', 'testimonial'].map((t) => ({ value: t, label: t[0].toUpperCase() + t.slice(1) })) },
+  },
+  { key: 'channel', name: 'Channel', type: 'text' },
+  { key: 'saved_at', name: 'Saved', type: 'date' },
+  { key: 'link', name: 'Open in Slack', type: 'link' },
+];
+
+export async function ensureEvidenceList(client, teamId) {
+  const org = await db.getOrg(teamId);
+  const missingKeys = EVIDENCE_COLUMN_DEFS.map((c) => c.key).filter((k) => !org?.evidence_list_columns?.[k]);
+  if (org?.evidence_list_id && org?.evidence_list_columns && !missingKeys.length) {
+    return { listId: org.evidence_list_id, columns: org.evidence_list_columns };
+  }
+  const created = await client.apiCall('slackLists.create', { name: 'Evidence Locker', schema: EVIDENCE_COLUMN_DEFS });
+  const listId = created.list_id;
+  const columns = Object.fromEntries((created.list_metadata?.schema ?? []).map((c) => [c.key, c.id]));
+  await db.setEvidenceList(teamId, listId, columns);
+  const postNames = org?.post_channels ?? [];
+  if (postNames.length) {
+    const { channels = [] } = await client.conversations.list({ types: 'public_channel', limit: 200 }).catch(() => ({}));
+    const channelIds = postNames.map((n) => channels.find((c) => c.name === n)?.id).filter(Boolean);
+    if (channelIds.length) {
+      await client.apiCall('slackLists.access.set', { list_id: listId, access_level: 'write', channel_ids: channelIds })
+        .catch((e) => console.warn('[lists:evidence:access]', e?.data?.error ?? e.message));
+    }
+  }
+  return { listId, columns };
+}
+
+/** Best-effort: create-or-update a Slack List row mirroring one saved evidence pointer. */
+export async function syncEvidenceToList(client, teamId, ptr) {
+  try {
+    const { listId, columns } = await ensureEvidenceList(client, teamId);
+    const summary = `${ptr.tag ?? 'story'} evidence${ptr.is_file ? ' (file)' : ''}`;
+    const fields = [
+      { column_id: columns.summary, ...textCell(summary) },
+      ...(columns.tag ? [{ column_id: columns.tag, select: [ptr.tag ?? 'story'] }] : []),
+      ...(columns.channel && ptr.channel_name ? [{ column_id: columns.channel, ...textCell(`#${ptr.channel_name}`) }] : []),
+      ...(columns.saved_at ? [{ column_id: columns.saved_at, date: [new Date().toISOString().slice(0, 10)] }] : []),
+      ...(columns.link && ptr.permalink ? [{ column_id: columns.link, link: [{ original_url: ptr.permalink, display_as_url: false }] }] : []),
+    ].filter((f) => f.column_id);
+    if (ptr.list_item_id) {
+      await client.apiCall('slackLists.items.update', {
+        list_id: listId,
+        cells: fields.map((f) => ({ row_id: ptr.list_item_id, column_id: f.column_id, ...omitColumnId(f) })),
+      });
+      return ptr.list_item_id;
+    }
+    const created = await client.apiCall('slackLists.items.create', { list_id: listId, initial_fields: fields });
+    const itemId = created.item?.id;
+    if (itemId) await db.setEvidenceListItem(teamId, ptr.channel_id, ptr.message_ts, itemId);
+    return itemId;
+  } catch (e) {
+    console.warn('[lists] evidence sync skipped:', e?.data?.error ?? e?.message);
+    return null;
+  }
+}
+
 async function canvasLinkFor(client, canvasId) {
   try {
     const { team } = await client.team.info();

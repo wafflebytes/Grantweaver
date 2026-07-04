@@ -120,6 +120,16 @@ export const db = {
       'UPDATE opportunities SET list_item_id=$3 WHERE team_id=$1 AND opp_id=$2',
       [teamId, String(oppId), listItemId]);
   },
+  async setEvidenceList(teamId, listId, columns) {
+    await pool.query(
+      'UPDATE orgs SET evidence_list_id=$2, evidence_list_columns=$3 WHERE team_id=$1',
+      [teamId, listId, JSON.stringify(columns)]);
+  },
+  async setEvidenceListItem(teamId, channelId, messageTs, listItemId) {
+    await pool.query(
+      'UPDATE evidence_pointers SET list_item_id=$4 WHERE team_id=$1 AND channel_id=$2 AND message_ts=$3',
+      [teamId, channelId, messageTs, listItemId]);
+  },
   async setOwner(teamId, oppId, userId) {
     await pool.query(
       'UPDATE opportunities SET owner_user_id=$3, last_activity_at=now() WHERE team_id=$1 AND opp_id=$2',

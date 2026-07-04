@@ -1,5 +1,6 @@
 import { db } from '../services/db.js';
 import { runIntent, markCardRunning } from '../agent/intents.js';
+import { syncEvidenceToList } from '../services/lists.js';
 
 async function detectFileMessage(client, channel, ts) {
   try {
@@ -12,11 +13,16 @@ async function detectFileMessage(client, channel, ts) {
 
 /** Shared by the 🧵 reaction flow and the "Save as evidence" message shortcut. */
 export async function saveEvidenceFromMessage(client, { teamId, channel, ts, userId }) {
-  const [{ permalink }, isFile] = await Promise.all([
+  const [{ permalink }, isFile, channelInfo] = await Promise.all([
     client.chat.getPermalink({ channel, message_ts: ts }).catch(() => ({ permalink: '' })),
     detectFileMessage(client, channel, ts),
+    client.conversations.info({ channel }).catch(() => null),
   ]);
   await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile, saved_by: userId });
+  syncEvidenceToList(client, teamId, {
+    channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile,
+    channel_name: channelInfo?.channel?.name,
+  }).catch(() => {});
   return {
     permalink,
     tagBlocks: [

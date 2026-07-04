@@ -1,7 +1,7 @@
 import { searchWorkspace, detectSearchMode, expandKeywordQuery } from './rts.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { db } from '../services/db.js';
-import { syncOpportunityToList } from '../services/lists.js';
+import { syncOpportunityToList, syncEvidenceToList } from '../services/lists.js';
 import { ensureOppCanvas, refreshOverviewAndRequirements } from '../services/canvas.js';
 import { grantCardV2, forecastCard, evidenceCardV2, confirmCard, pipelineCard } from '../surfaces/cards.js';
 import { buildFeedbackBlocks } from '../surfaces/blocks.js';
@@ -338,6 +338,8 @@ export function buildToolbelt(ctx) {
       if (action === 'list') return { pointers: await db.listEvidence(teamId) };
       if (!channel_id || !message_ts) return { error: 'save requires channel_id and message_ts' };
       await db.saveEvidence(teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, saved_by: userId });
+      const channelInfo = await client.conversations.info({ channel: channel_id }).catch(() => null);
+      syncEvidenceToList(client, teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, channel_name: channelInfo?.channel?.name }).catch(() => {});
       return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored).' };
     },
 
