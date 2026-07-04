@@ -103,6 +103,25 @@ export async function runAgentTurn(ctx) {
     });
   }
 
+  try {
+    return await runTurnLoop();
+  } catch (e) {
+    // Live-caught: an LLM call throwing here (timeout, network error) with
+    // no catch left an already-started stream open forever — Slack showed
+    // "streaming_state: in_progress" with empty text, no message, no error,
+    // indefinitely. The caller's own try/catch (mention.js/assistant.js)
+    // posts a NEW separate error message, but never closes THIS stream, so
+    // both a zombie blank message and a real one would exist side by side.
+    // Close it out here with something honest before re-throwing.
+    console.error('[loop] turn failed:', e?.message ?? e);
+    if (streamer) {
+      await getStreamer().append({ markdown_text: "Something snagged mid-turn 🧶 — the model or a tool call didn't come back in time. Try again in a moment." }).catch(() => {});
+      await getStreamer().stop({}).catch(() => {});
+    }
+    throw e;
+  }
+
+  async function runTurnLoop() {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let response = await withRetry(() =>
       getLlm().chat.completions.create({
@@ -167,6 +186,7 @@ export async function runAgentTurn(ctx) {
   await getStreamer().append({ markdown_text: "That one took more steps than I allow myself 🧶 — here's where I got to. Say *continue* and I'll pick it right up." });
   await getStreamer().stop({ blocks: buildFeedbackBlocks() });
   return { title: inferTitle(ctx.userText), toolCalls };
+  }
 }
 
 function safeJson(obj, cap) {

@@ -587,6 +587,18 @@ async function ensureChannels() {
       try { userIds.push((await client.auth.test()).user_id); } catch { /* token invalid/missing — skip */ }
     }
     if (userIds.length) await bot.conversations.invite({ channel: ids[name], users: userIds.join(',') }).catch(() => {});
+    // SEED_BOT_TOKEN is the seeder app (a different Slack app from
+    // Grantweaver itself) — live-caught bug: nothing ever invited the
+    // actual Grantweaver bot into freshly (re)created channels, so
+    // @-mentioning it after a --wipe reseed silently did nothing (no
+    // app_mention event ever fires for a bot that isn't a channel member).
+    if (process.env.SLACK_BOT_TOKEN) {
+      try {
+        const gw = new WebClient(process.env.SLACK_BOT_TOKEN);
+        const gwUserId = (await gw.auth.test()).user_id;
+        await bot.conversations.invite({ channel: ids[name], users: gwUserId }).catch(() => {});
+      } catch { /* SLACK_BOT_TOKEN missing/invalid in this environment — skip */ }
+    }
   }
   return { ids, joined };
 }

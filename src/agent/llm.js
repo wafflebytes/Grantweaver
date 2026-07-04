@@ -14,6 +14,12 @@ export function getLlm() {
   llm ??= new OpenAI({
     apiKey: process.env.LLM_API_KEY,
     baseURL: process.env.LLM_BASE_URL, // Gemini compat / NVIDIA NIM / OpenRouter / Ollama
+    // Without this the SDK's own default (10 minutes) applies — live-caught:
+    // a hung upstream call left a Slack stream open ("streaming_state:
+    // in_progress", empty text) with no error surfaced for over 5 minutes,
+    // since nothing downstream ever got a chance to react. 120s covers the
+    // slowest known-good reasoning-model turns (60-90s) with headroom.
+    timeout: 120_000,
   });
   return llm;
 }
