@@ -5,6 +5,7 @@ import { grantsGov } from '../mcp/grantsgov-client.js';
 import { SYSTEM_PROMPT, renderOrgContext } from '../prompts/system.js';
 import { completeOnce } from '../agent/llm.js';
 import { registerIntentExecutor } from '../agent/intents.js';
+import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 
 function slug(title) {
   return String(title ?? 'grant').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'grant';
@@ -104,6 +105,7 @@ registerIntentExecutor('export_pack', async (client, intent) => {
   await client.chat.postMessage({
     channel: intent.channel_id, thread_ts: intent.message_ts,
     text: `📦 Working pack for *${title}* — everything a human (or another AI) needs to take this further. Fresh from live sources just now.`,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `📦 Working pack for *${title}* — everything a human (or another AI) needs to take this further. Fresh from live sources just now.` } }, ...buildFeedbackBlocks()],
   });
 });
 
@@ -114,5 +116,6 @@ registerIntentExecutor('answers', async (client, intent) => {
   await client.chat.postMessage({
     channel: intent.channel_id, thread_ts: intent.message_ts,
     text: `📋 Copy-ready answers for *${title}* — paste into the funder's form. Everything unverified is marked [TEAM TO CONFIRM].`,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `📋 Copy-ready answers for *${title}* — paste into the funder's form. Everything unverified is marked [TEAM TO CONFIRM].` } }, ...buildFeedbackBlocks()],
   });
 });
