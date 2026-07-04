@@ -234,7 +234,9 @@ export function buildToolbelt(ctx) {
       const notRelevant = teamId ? await db.listNotRelevant(teamId) : [];
       const rejectedIds = new Set(notRelevant.map((s) => s.subject));
       const visible = opps.filter((o) => !rejectedIds.has(String(o.opp_id)));
-      const scored = visible.map((o) => ({ ...o, ...scoreMatch(o, org) }))
+      const scored = visible
+        .map((o) => ({ ...o, title: sanitizeText(o.title), agency: sanitizeText(o.agency) }))
+        .map((o) => ({ ...o, ...scoreMatch(o, org) }))
         .sort((a, b) => b.match_score - a.match_score);
       const top = scored.slice(0, 6);
       const fitByOpp = await fitFor(teamId, org, top);
@@ -391,6 +393,11 @@ export function sanitizeText(v) {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    // Zero-width space, both its numeric entity form and the raw unicode
+    // char — grants.gov titles carry these too (live-reported: "Kinship
+    // Navigator Programs...&#8203;&#8203;" rendered verbatim in a search card).
+    .replace(/&#8203;/g, '')
+    .replace(/​/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
