@@ -4,7 +4,7 @@ import { db } from '../services/db.js';
 import { postDigestNow } from '../services/digest.js';
 import { orgLinkUrl } from '../services/weblink.js';
 import { runWatchSweep } from '../services/watches.js';
-import { runHarvestSimulate, runUpdateRequestSweep } from './proactive.js';
+import { runHarvestSimulate, runUpdateRequestSweep, runReviewingStaleSweep } from './proactive.js';
 import { runDeadlineSweepOnce } from '../services/scheduler.js';
 import { reconcileListEdits } from '../services/lists.js';
 import { postMemoriesRecap } from '../services/memories.js';
@@ -101,6 +101,10 @@ export function registerCommands(app) {
         await postDigestNow(client, command.team_id);
         return respond({ response_type: 'ephemeral', text: '🧶 Digest posted.' });
       }
+      if (target === 'reviewing-stale') {
+        const result = await runReviewingStaleSweep(client, command.team_id, { bypassThrottle: true, channelOverride: command.channel_id });
+        return respond({ response_type: 'ephemeral', text: result.nudged.length ? `🧶 Nudged on opp ${result.nudged[0]}.` : 'No suggested/reviewing opportunities are stale enough yet.' });
+      }
       if (target === 'memories') {
         const result = await postMemoriesRecap(client, command.team_id);
         return respond({ response_type: 'ephemeral', text: result.posted
@@ -114,7 +118,7 @@ export function registerCommands(app) {
         await reconcileListEdits(client, command.team_id);
         return respond({ response_type: 'ephemeral', text: '🧶 Reconciled the pipeline List against any manual edits.' });
       }
-      return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|deadline|digest|memories|sync-list>`' });
+      return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|reviewing-stale|deadline|digest|memories|sync-list>`' });
     }
 
     // Live feature request: a way to reset the DM for demo takes without

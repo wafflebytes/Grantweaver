@@ -3,7 +3,7 @@
 // nudges are wired from scheduler.js, which calls the exported sweep
 // functions here.
 import { db } from '../services/db.js';
-import { updateRequestCard } from './cards.js';
+import { updateRequestCard, staleReviewingCard } from './cards.js';
 import { classifyHarvest } from '../prompts/classifiers.js';
 
 const EVIDENCE_INTENT = /\b(\d+%|\d+ (kids|students|youth|families|participants|attendees)|increased|improved|graduated|completed|enrolled|served|thank you|thanks so much|so grateful|testimonial)\b/i;
@@ -148,6 +148,37 @@ export async function runUpdateRequestSweep(client, teamId = null, { bypassThrot
     }
     return { picked: opp?.opp_id ?? null };
   }
+}
+
+/** Nudges on opportunities OUTSIDE 'drafting' that have gone quiet — update
+ * requests only cover drafting, leaving 'suggested'/'reviewing' opps that
+ * nobody ever acted on invisible to any proactive touchpoint. Posts to the
+ * org's post channel (where it surfaced) rather than an owner DM, since
+ * these are often unassigned. */
+export async function runReviewingStaleSweep(client, teamId = null, { bypassThrottle = false, channelOverride = null } = {}) {
+  const orgs = teamId ? [await db.getOrg(teamId)].filter(Boolean) : await db.allOrgs();
+  const STALE_DAYS = 10;
+  const results = [];
+  for (const org of orgs) {
+    const channel = channelOverride ?? org.post_channels?.[0] ?? org.digest_channel;
+    if (!channel) continue;
+    const stale = (await db.listOpportunities(org.team_id))
+      .filter((o) => ['suggested', 'reviewing'].includes(o.stage))
+      .map((o) => ({ o, daysStale: Math.floor((Date.now() - new Date(o.last_activity_at ?? o.created_at).getTime()) / 86400000) }))
+      .filter(({ daysStale }) => daysStale >= STALE_DAYS);
+    for (const { o, daysStale } of stale) {
+      if (!bypassThrottle) {
+        const recent = await db.countSignalsSince(org.team_id, 'reviewing_stale', o.opp_id, 7 * 24);
+        if (recent > 0) continue;
+      }
+      await client.chat.postMessage({ channel, text: `${o.title} has gone quiet`, blocks: staleReviewingCard(o, daysStale) }).catch(() => {});
+      await db.addSignal(org.team_id, { kind: 'reviewing_stale', subject: o.opp_id, detail: 'nudge_sent' });
+      results.push(o.opp_id);
+      if (bypassThrottle) break; // simulate: one nudge is enough to prove the path
+    }
+    if (bypassThrottle) break;
+  }
+  return { nudged: results };
 }
 
 /** /grantweaver simulate harvest — runs the pipeline against the most recent watched-channel message, bypassing throttle+heuristics. */

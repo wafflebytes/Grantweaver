@@ -3,7 +3,7 @@ import { db } from './db.js';
 import { postDigestNow } from './digest.js';
 import { reconcileListEdits } from './lists.js';
 import { runWatchSweep } from './watches.js';
-import { runUpdateRequestSweep } from '../surfaces/proactive.js';
+import { runUpdateRequestSweep, runReviewingStaleSweep } from '../surfaces/proactive.js';
 import { deadlineCard } from '../surfaces/cards.js';
 import { postMemoriesRecap } from './memories.js';
 
@@ -41,6 +41,12 @@ export function startScheduler(app) {
     await runUpdateRequestSweep(app.client).catch((e) => console.error('[update-requests]', e?.message ?? e));
   });
 
+  // Stale-in-review nudge — daily 9:45, covers suggested/reviewing opps that
+  // update-requests (drafting-only) never touches.
+  cron.schedule('45 9 * * *', async () => {
+    await runReviewingStaleSweep(app.client).catch((e) => console.error('[reviewing-stale]', e?.message ?? e));
+  });
+
   // Intent expiry: a confirm card nobody ever clicked shouldn't
   // stay "pending" forever — sweep hourly.
   cron.schedule('0 * * * *', async () => {
@@ -73,7 +79,7 @@ export function startScheduler(app) {
     }
   });
 
-  console.log('[scheduler] weekly digest (Mon 9:00) + weekly memories recap (Fri 16:00) + daily deadline nudges (9:15) + daily update-requests (9:30) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
+  console.log('[scheduler] weekly digest (Mon 9:00) + weekly memories recap (Fri 16:00) + daily deadline nudges (9:15) + daily update-requests (9:30) + daily stale-in-review nudge (9:45) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
 }
 
 /** Exported for tests & manual runs. */

@@ -284,6 +284,27 @@ export function scanSummaryCard({ index = [], webUrl } = {}) {
   ];
 }
 
+// ── Proactive: stale-in-review nudge ──────────────────────────────────
+// updateRequestCard only covers 'drafting' — this covers every other
+// active stage sitting untouched, so the agent's proactive touchpoints
+// aren't blind to opportunities that never made it past a first look.
+export function staleReviewingCard(opp, daysStale) {
+  const days = daysUntil(opp.close_date);
+  return [
+    { type: 'section', text: { type: 'mrkdwn',
+      text: `🔍 *${opp.title}* has sat in _${opp.stage}_ for ${daysStale} days with no activity${days != null ? ` (closes in ${days} days)` : ''}. Worth a decision?` } },
+    {
+      type: 'actions',
+      elements: [
+        { type: 'button', style: 'primary', action_id: 'gw:pipe:draft', value: JSON.stringify({ o: String(opp.opp_id) }),
+          text: { type: 'plain_text', text: 'Move to drafting' }, accessibility_label: `Move ${opp.title} to drafting` },
+        { type: 'button', action_id: 'gw:pipe:remove', style: 'danger', value: JSON.stringify({ o: String(opp.opp_id) }),
+          text: { type: 'plain_text', text: 'Not a fit' }, accessibility_label: `Decline ${opp.title}` },
+      ],
+    },
+  ];
+}
+
 // ── Proactive: update request ─────────────────────────────────────────
 export function updateRequestCard(opp) {
   const days = daysUntil(opp.close_date);
