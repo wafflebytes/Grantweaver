@@ -1,6 +1,8 @@
 import cron from 'node-cron';
 import { db } from './db.js';
 import { postDigestNow } from './digest.js';
+import { reconcileListEdits } from './lists.js';
+import { runWatchSweep } from './watches.js';
 
 export function startScheduler(app) {
   // Weekly digest — Monday 9:00 server time (per-org cron is a v2 nicety;
@@ -36,7 +38,21 @@ export function startScheduler(app) {
     if (n) console.log(`[intents] expired ${n} stale pending intent(s)`);
   });
 
-  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) + hourly intent-expiry armed');
+  // Two-way Lists reconcile: pipeline-tool triggers cover the interactive
+  // path, this hourly sweep catches edits nobody's turn happened to touch.
+  cron.schedule('30 * * * *', async () => {
+    for (const org of await db.allOrgs()) {
+      if (org.pipeline_list_id) await reconcileListEdits(app.client, org.team_id).catch(() => {});
+    }
+  });
+
+  // Watch sweep: fresh Grants.gov matches/forecast-opens against standing
+  // watches, three times a day.
+  cron.schedule('0 8,13,18 * * *', async () => {
+    await runWatchSweep(app.client).catch((e) => console.error('[watches]', e?.message ?? e));
+  });
+
+  console.log('[scheduler] weekly digest (Mon 9:00) + daily deadline nudges (9:15) + hourly intent-expiry + hourly list-reconcile + 3x/day watch-sweep armed');
 }
 
 /** Exported for tests & manual runs. */

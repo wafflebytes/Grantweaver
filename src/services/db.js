@@ -7,6 +7,19 @@ const pool = new pg.Pool({
   max: 10,
 });
 
+// Grants.gov close_date arrives in several shapes across endpoints
+// ("10/16/2026" from search2, "Aug 17, 2026 12:00:00 AM EDT" from
+// fetchOpportunity) and the model itself sometimes forwards a raw
+// stringified JS Date when composing a tool call — Postgres's DATE cast
+// chokes on a trailing "GMT+0530 (India Standard Time)"-style offset
+// (misreads it as an unrecognized timezone name). Normalize defensively
+// rather than trust the caller's format.
+function safeDate(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
 export const db = {
   pool, // exposed for tests only
 
@@ -53,7 +66,7 @@ export const db = {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reviewing',$9,$10)
        ON CONFLICT (team_id, opp_id) DO UPDATE SET stage='reviewing', updated_at=now()`,
       [teamId, String(o.opp_id), o.opp_number ?? null, o.title, o.agency ?? null,
-       o.close_date || null, o.award_ceiling || null, o.url ?? null, o.match_score ?? null, o.added_by ?? null]);
+       safeDate(o.close_date), o.award_ceiling || null, o.url ?? null, o.match_score ?? null, o.added_by ?? null]);
   },
   async moveOpportunity(teamId, oppId, stage) {
     await pool.query(
@@ -61,9 +74,20 @@ export const db = {
       [teamId, String(oppId), stage]);
   },
   async attachCanvas(teamId, oppId, canvasId) {
+    // Called when the Draft section actually gets written (not when the
+    // canvas is merely created at add-time, pre-draft) — only bump the stage
+    // the first time a draft lands on an opp that hasn't started drafting
+    // yet; a redraft on an already-further opp must not regress its stage.
     await pool.query(
-      `UPDATE opportunities SET canvas_id=$3, stage='drafting', updated_at=now()
+      `UPDATE opportunities SET canvas_id=$3, updated_at=now(),
+         stage = CASE WHEN stage IN ('suggested','reviewing') THEN 'drafting' ELSE stage END
        WHERE team_id=$1 AND opp_id=$2`, [teamId, String(oppId), canvasId]);
+  },
+  /** Sets canvas_id with NO stage change — used by ensureOppCanvas at add-time, before any Draft content exists. */
+  async setCanvasId(teamId, oppId, canvasId) {
+    await pool.query(
+      'UPDATE opportunities SET canvas_id=$3, updated_at=now() WHERE team_id=$1 AND opp_id=$2',
+      [teamId, String(oppId), canvasId]);
   },
   async setPipelineList(teamId, listId, columns) {
     await pool.query(

@@ -28,7 +28,9 @@ vi.mock('../src/services/db.js', () => ({
 }));
 
 vi.mock('../src/services/canvas.js', () => ({
-  createDraftCanvas: vi.fn(async () => ({ canvasId: 'F1', canvasUrl: 'https://x.slack.com/docs/T1/F1' })),
+  ensureOppCanvas: vi.fn(async () => ({ canvasId: 'F1', canvasUrl: 'https://x.slack.com/docs/T1/F1' })),
+  editSections: vi.fn(async () => true),
+  appendActivity: vi.fn(async () => true),
 }));
 vi.mock('../src/services/lists.js', () => ({ syncOpportunityToList: vi.fn(async () => {}) }));
 

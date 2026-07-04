@@ -90,6 +90,11 @@ export function buildServer() {
         close_date: syn.responseDate,
         eligibility: String(syn.applicantEligibilityDesc ?? '').slice(0, 1500),
         contact: syn.agencyContactEmail,
+        // Live-verified field names: applicantTypes lives on
+        // `synopsis`, not the top-level record; attachment folders are
+        // top-level. We surface names only — D10 says never download them.
+        applicant_types: (syn.applicantTypes ?? []).map((t) => ({ id: t.id, description: t.description })),
+        docs: (s.synopsisAttachmentFolders ?? []).map((f) => f.name).filter(Boolean),
       });
     },
   );

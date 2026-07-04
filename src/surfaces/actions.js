@@ -2,8 +2,10 @@ import { db } from '../services/db.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { runIntent, markCardRunning, markCardCancelled } from '../agent/intents.js';
+import { addOpportunityFull } from '../agent/tools.js';
 import { confirmCard, shareCard } from './cards.js';
 import '../services/exportpack.js'; // side effect: registers the export_pack/answers intent executors
+import { openRevisionThread } from '../agent/revise.js'; // also registers the 'revise' intent executor as a side effect
 
 // Every channel follow-up threads under the triggering message
 // — this exact line is the fix for "view more should land in the same
@@ -137,15 +139,15 @@ export function registerActions(app) {
     const teamId = body.team.id, thread_ts = replyTarget(body);
     try {
       const d = await grantsGov.fetchOpportunity(o);
-      await db.addOpportunity(teamId, {
+      await addOpportunityFull(client, teamId, {
         opp_id: o, opp_number: d.opp_number, title: d.title, agency: d.agency,
         close_date: d.close_date, award_ceiling: d.award_ceiling,
         url: `https://grants.gov/search-results-detail/${o}`, added_by: body.user.id,
+        channelId: body.channel.id,
       });
-      syncOpportunityToList(client, teamId, { opp_id: o, ...d, stage: 'reviewing' }).catch(() => {});
       await client.chat.postMessage({
         channel: body.channel.id, thread_ts,
-        text: `➕ Added *${d.title}* to your pipeline (Reviewing). See it on my Home tab.`,
+        text: `➕ Added *${d.title}* to your pipeline (Reviewing) — canvas created, checklist + fit filling in. See it on my Home tab.`,
       });
     } catch (e) {
       console.error('[gw:grant:add]', e?.message ?? e);
@@ -376,10 +378,39 @@ export function registerActions(app) {
   // ── gw:draft:* ─────────────────────────────────────────────────────
   app.action('gw:draft:revise', async ({ ack, action, body, client }) => {
     await ack();
-    await client.chat.postMessage({
-      channel: body.channel.id, thread_ts: replyTarget(body),
-      text: "What should change? Tell me here — everyone in this thread can pile on requests. When you're done, hit *Apply changes* and I'll confirm the scope before I touch the draft.",
+    const { o } = val(action);
+    const teamId = body.team.id;
+    const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
+    if (!opp?.canvas_id) {
+      await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+        text: "There's no draft yet — ask me to draft it first." });
+      return;
+    }
+    await openRevisionThread(client, { teamId, channel: body.channel.id, thread_ts: replyTarget(body), opp });
+  });
+
+  app.action('gw:draft:revise:apply', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    const teamId = body.team.id, thread_ts = replyTarget(body), channel = body.channel.id;
+    const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
+    const intent = await db.createIntent(teamId, {
+      kind: 'revise',
+      params: { opp_id: o, thread_channel: channel, thread_ts },
+      requested_by: body.user.id, channel_id: channel,
     });
+    const posted = await client.chat.postMessage({
+      channel, thread_ts, text: 'Ready to weave in the changes',
+      blocks: confirmCard(intent, { summary: `I'll re-read this thread's requests and revise *${opp?.title ?? o}*'s Draft section in place.`, etaSeconds: 25 }),
+    });
+    await db.setIntentMessage(intent.id, posted.ts);
+  });
+
+  app.action('gw:draft:revise:nevermind', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o } = val(action);
+    await client.chat.postMessage({ channel: body.channel.id, thread_ts: replyTarget(body),
+      text: `No changes applied to *${o}*'s draft. Ping me again whenever.` });
   });
 
   async function markReadyOrWarn({ o, teamId, channel, thread_ts, actor }) {

@@ -27,8 +27,12 @@ async function callTool(name, args) {
 }
 
 export const grantsGov = {
-  async search({ keyword, oppStatuses = 'posted|forecasted', rows = 10, eligibilities }) {
-    const out = await callTool('search_grants', { keyword, oppStatuses, rows, ...(eligibilities ? { eligibilities } : {}) });
+  async search({ keyword, oppStatuses = 'posted|forecasted', rows = 10, eligibilities, agencies }) {
+    const out = await callTool('search_grants', {
+      keyword, oppStatuses, rows,
+      ...(eligibilities ? { eligibilities } : {}),
+      ...(agencies ? { agencies } : {}),
+    });
     return out.opportunities ?? [];
   },
   async fetchOpportunity(oppId) {
