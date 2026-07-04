@@ -2,7 +2,7 @@ import { searchWorkspace, detectSearchMode, expandKeywordQuery } from './rts.js'
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { db } from '../services/db.js';
 import { syncOpportunityToList } from '../services/lists.js';
-import { ensureOppCanvas } from '../services/canvas.js';
+import { ensureOppCanvas, refreshOverviewAndRequirements } from '../services/canvas.js';
 import { grantCardV2, forecastCard, evidenceCardV2, confirmCard } from '../surfaces/cards.js';
 import { stashDraftMarkdown } from './intents.js';
 import { assessFitBatch, extractChecklist } from '../prompts/classifiers.js';
@@ -230,7 +230,10 @@ export function buildToolbelt(ctx) {
           for (const id of checklist_done) await db.toggleChecklistItem(teamId, opp_id, id, true);
         }
         const moved = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id));
-        if (moved) syncOpportunityToList(client, teamId, moved).catch(() => {});
+        if (moved) {
+          syncOpportunityToList(client, teamId, moved).catch(() => {});
+          if (owner_user_id || checklist_done?.length) refreshOverviewAndRequirements(client, teamId, moved).catch(() => {});
+        }
         return { ok: true, opp_id, stage };
       }
       return { error: `unknown action ${action}` };

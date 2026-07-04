@@ -92,7 +92,7 @@ export async function buildAnswers(client, teamId, oppId) {
   const markdown = await completeOnce([
     { role: 'system', content: system },
     { role: 'user', content: userMsg },
-  ], { maxTokens: 2500 });
+  ], { maxTokens: 6000 });
 
   return { title: opp?.title ?? `Opportunity ${oppId}`, content: markdown, filename: `${slug(opp?.title ?? oppId)}-answers.md` };
 }

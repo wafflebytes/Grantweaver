@@ -3,6 +3,7 @@ import { grantsGov } from '../mcp/grantsgov-client.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { runIntent, markCardRunning, markCardCancelled } from '../agent/intents.js';
 import { addOpportunityFull } from '../agent/tools.js';
+import { refreshOverviewAndRequirements } from '../services/canvas.js';
 import { confirmCard, shareCard } from './cards.js';
 import '../services/exportpack.js'; // side effect: registers the export_pack/answers intent executors
 import { openRevisionThread } from '../agent/revise.js'; // also registers the 'revise' intent executor as a side effect
@@ -287,6 +288,10 @@ export function registerActions(app) {
     await db.setOwner(teamId, pending.o, newOwner);
     await db.logActivity(teamId, pending.o, { actor: body.user.id, kind: 'owner', summary: `Assigned to <@${newOwner}> by <@${body.user.id}>` });
     const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(pending.o));
+    if (opp) {
+      syncOpportunityToList(client, teamId, opp).catch(() => {});
+      refreshOverviewAndRequirements(client, teamId, opp).catch(() => {});
+    }
     await client.chat.postMessage({ channel: body.channel.id, thread_ts: pending.thread_ts,
       text: `Assigned *${opp?.title ?? pending.o}* to <@${newOwner}>.` });
     await client.chat.postMessage({

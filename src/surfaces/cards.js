@@ -5,6 +5,14 @@
 // Phase-1 renders).
 
 function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
+// DB rows carry close_date as a JS Date object (pg's DATE type); fresh
+// grants.gov search results carry it as a plain "MM/DD/YYYY" string.
+// Interpolating a Date directly renders its ugly toString() ("Sat May 24
+// 2029 18:30:00 GMT+0000 (...)") in a card — normalize display everywhere.
+function fmtDate(v) {
+  if (!v) return null;
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+}
 function daysUntil(dateStr) {
   return dateStr ? Math.ceil((new Date(dateStr) - Date.now()) / 86400000) : null;
 }
@@ -35,7 +43,7 @@ export function grantCardV2(o, { fit } = {}) {
   const fitLine = fitContextLine(o, fit);
   return [
     { type: 'section', text: { type: 'mrkdwn',
-      text: `*${o.title}*\n${o.agency ?? ''}\n*Ceiling:* ${money(o.award_ceiling)} · *Closes:* ${o.close_date ?? 'rolling'}${days != null ? ` (${days} days)` : ''}` } },
+      text: `*${o.title}*\n${o.agency ?? ''}\n*Ceiling:* ${money(o.award_ceiling)} · *Closes:* ${fmtDate(o.close_date) ?? 'rolling'}${days != null ? ` (${days} days)` : ''}` } },
     ...(badge ? [{ type: 'section', text: { type: 'mrkdwn', text: badge } }] : []),
     ...(fitLine ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: fitLine }] }] : []),
     {
@@ -67,7 +75,7 @@ export function forecastCard(o, { fit } = {}) {
   const fitLine = fitContextLine(o, fit);
   return [
     { type: 'section', text: { type: 'mrkdwn',
-      text: `*${o.title}*\n${o.agency ?? ''}\n🔮 *Forecast — expected to post ${o.close_date ?? 'soon'}.* Not open yet.` } },
+      text: `*${o.title}*\n${o.agency ?? ''}\n🔮 *Forecast — expected to post ${fmtDate(o.close_date) ?? 'soon'}.* Not open yet.` } },
     ...(fitLine ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: fitLine }] }] : []),
     {
       type: 'actions',
@@ -97,7 +105,7 @@ export function pipelineCard(opp) {
   const done = checklist.filter((c) => c.done).length;
   return [
     { type: 'section', text: { type: 'mrkdwn',
-      text: `*${opp.title}* · _${opp.stage}_\nOwner: ${opp.owner_user_id ? `<@${opp.owner_user_id}>` : 'unassigned'} · Closes ${opp.close_date ?? 'rolling'} · Checklist ${done}/${checklist.length}` } },
+      text: `*${opp.title}* · _${opp.stage}_\nOwner: ${opp.owner_user_id ? `<@${opp.owner_user_id}>` : 'unassigned'} · Closes ${fmtDate(opp.close_date) ?? 'rolling'} · Checklist ${done}/${checklist.length}` } },
     {
       type: 'actions',
       elements: [

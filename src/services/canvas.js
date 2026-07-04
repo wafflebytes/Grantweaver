@@ -6,13 +6,19 @@ import { db } from './db.js';
 const SECTION_HEADINGS = ['Overview', 'Requirements', 'Draft', 'Evidence', 'Activity'];
 
 function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
+// Same Date-vs-string inconsistency as cards.js — DB rows carry close_date
+// as a JS Date; interpolating it directly renders its ugly toString().
+function fmtDate(v) {
+  if (!v) return null;
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+}
 
 function overviewMarkdown(opp) {
   const fit = opp.fit_score != null ? `\nFit: ${opp.fit_score}/100 — ${opp.fit_rationale ?? ''}` : '';
   return [
     `**Agency:** ${opp.agency ?? '—'}`,
     `**Number:** ${opp.opp_number ?? opp.opp_id ?? '—'}`,
-    `**Closes:** ${opp.close_date ?? 'rolling'}  ·  **Ceiling:** ${money(opp.award_ceiling)}`,
+    `**Closes:** ${fmtDate(opp.close_date) ?? 'rolling'}  ·  **Ceiling:** ${money(opp.award_ceiling)}`,
     `**Owner:** ${opp.owner_user_id ? `<@${opp.owner_user_id}>` : 'unassigned'}`,
     fit,
   ].filter(Boolean).join('\n');
@@ -50,6 +56,20 @@ export async function ensureOppCanvas(client, teamId, opp) {
   await db.setCanvasId(teamId, opp.opp_id, canvasId);
   await db.logActivity(teamId, opp.opp_id, { actor: 'agent', kind: 'note', summary: 'Canvas created' });
   return { canvasId, canvasUrl };
+}
+
+/**
+ * Branch B means Overview/Requirements are agent-owned and safe to
+ * regenerate from DB truth any time (unlike Draft, which only changes via
+ * the revision flow) — call this after anything that changes owner/fit/
+ * checklist/stage on an opp that already has a canvas.
+ */
+export async function refreshOverviewAndRequirements(client, teamId, opp) {
+  if (!opp?.canvas_id) return false;
+  return editSections(client, opp.canvas_id, {
+    Overview: overviewMarkdown(opp),
+    Requirements: requirementsMarkdown(opp.checklist),
+  });
 }
 
 /** Replace one H2 section's body. Looks the section up by heading text every call (ids aren't cached — cheap, and survives a human reordering nothing since headings are a contract). */

@@ -1,5 +1,5 @@
 // One-shot JSON classifiers — always temperature 0, always survive malformed
-// output (docs/24 §7.2/§8.1 fallback rule: a bad LLM response degrades the
+// output (a bad LLM response degrades the
 // feature, never blocks the turn).
 import { completeOnce } from '../agent/llm.js';
 
@@ -78,15 +78,30 @@ function parseJsonArray(text) {
   }
 }
 
+/**
+ * A reasoning model's own chain-of-thought competes with the JSON answer for
+ * the SAME max_tokens budget, and its length is non-deterministic even at
+ * temperature 0 (live-confirmed: the identical prompt burned ~2000 reasoning
+ * tokens on one call and ~5000 on the next) — so a single fixed budget can
+ * legitimately come back empty by chance, not just on a real failure. One
+ * retry at a much larger budget recovers most of these before we fall back.
+ */
+async function completeWithReasoningHeadroom(messages, temperature) {
+  for (const maxTokens of [8000, 14000]) {
+    const text = await completeOnce(messages, { temperature, maxTokens });
+    const parsed = parseJsonArray(text);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 /** ONE LLM call for up to 6 opps. Never throws — callers fall back to Phase-1 scoreMatch stars on any failure. */
 export async function assessFitBatch(org, opps) {
   if (!opps.length) return [];
   try {
-    const text = await completeOnce(
-      [{ role: 'user', content: fitBatchPrompt(org, org?._notRelevant ?? [], opps.slice(0, 6)) }],
-      { temperature: 0, maxTokens: 1200 },
+    const parsed = await completeWithReasoningHeadroom(
+      [{ role: 'user', content: fitBatchPrompt(org, org?._notRelevant ?? [], opps.slice(0, 6)) }], 0,
     );
-    const parsed = parseJsonArray(text);
     if (!parsed) return [];
     return parsed
       .filter((r) => r && typeof r.opp_id !== 'undefined')
@@ -106,11 +121,9 @@ export async function assessFitBatch(org, opps) {
 /** ONE LLM call at add-time. Never throws — an empty checklist is a safe degrade (just no % shown). */
 export async function extractChecklist(opp) {
   try {
-    const text = await completeOnce(
-      [{ role: 'user', content: checklistPrompt(opp) }],
-      { temperature: 0, maxTokens: 900 },
+    const parsed = await completeWithReasoningHeadroom(
+      [{ role: 'user', content: checklistPrompt(opp) }], 0,
     );
-    const parsed = parseJsonArray(text);
     if (!parsed) return [];
     const items = parsed
       .filter((it) => it && it.id && it.label)

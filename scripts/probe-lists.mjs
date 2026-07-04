@@ -1,4 +1,4 @@
-// P2.0b probe: Slack Lists column type names, cell read/update shapes, and
+// Probe: Slack Lists column type names, cell read/update shapes, and
 // whether the sandbox's plan even allows list creation.
 // Run: node --env-file=.env scripts/probe-lists.mjs
 import { WebClient } from '@slack/web-api';

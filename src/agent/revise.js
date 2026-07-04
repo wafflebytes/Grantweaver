@@ -68,7 +68,7 @@ registerIntentExecutor('revise', async (client, intent) => {
     .map((m) => `<@${m.user}>: ${m.text}`)
     .join('\n');
 
-  // Branch B (docs/12 §5): no live read-back of the current Draft section —
+  // Branch B: no live read-back of the current Draft section —
   // we ask the model to revise from the LAST version we ourselves wrote,
   // never a version we can't verify; a human-hand-edited Draft since our
   // last write is preserved as-is unless the thread explicitly asks to
@@ -79,7 +79,7 @@ registerIntentExecutor('revise', async (client, intent) => {
   await post('_Weaving in the changes…_');
   const text = await completeOnce([
     { role: 'user', content: revisePrompt({ current: lastKnownDraft, requests }) },
-  ], { maxTokens: 3000 });
+  ], { maxTokens: 4000 });
   const { draft, diff } = parseRevision(text);
 
   await editSections(client, opp.canvas_id, { Draft: draft });

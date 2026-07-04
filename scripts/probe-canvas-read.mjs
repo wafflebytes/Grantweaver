@@ -1,6 +1,5 @@
-// P2.0 probe: is there any live path to read a canvas's full markdown back?
+// Probe: is there any live path to read a canvas's full markdown back?
 // Run: node --env-file=.env scripts/probe-canvas-read.mjs
-// Paste raw output + the branch decision into docs/12 §5 and docs/20 §4.
 import { WebClient } from '@slack/web-api';
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);

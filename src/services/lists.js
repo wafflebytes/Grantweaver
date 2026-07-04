@@ -6,6 +6,7 @@
 // plan-gated on this sandbox; `items.list` returns fully typed cell values,
 // so two-way sync (reconcileListEdits) is real, not a write-only fallback.
 import { db } from './db.js';
+import { refreshOverviewAndRequirements } from './canvas.js';
 
 const STAGES = ['suggested', 'reviewing', 'drafting', 'submitted', 'awarded', 'declined'];
 const STAGE_COLORS = { suggested: 'gray', reviewing: 'blue', drafting: 'yellow', submitted: 'orange', awarded: 'green', declined: 'red' };
@@ -24,6 +25,16 @@ const COLUMN_DEFS = [
   { key: 'checklist', name: 'Checklist %', type: 'number' },
   { key: 'draft', name: 'Draft', type: 'link' },
 ];
+
+// db.js's pg driver returns DATE columns as JS Date objects, not strings —
+// `String(date)` produces "Sat May 24 2029 18:30:00 GMT+0000 (...)" garbage
+// instead of an ISO date, which Slack's `date` cell type silently rejected
+// (`internal_error`) rather than throwing something legible. Handle both.
+function isoDate(v) {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
 
 function textCell(value) {
   return {
@@ -46,8 +57,10 @@ function fieldsFor(columns, opp, canvasUrl) {
   return [
     val('title', textCell(opp.title ?? opp.opp_id)),
     val('stage', { select: [opp.stage ?? 'suggested'] }),
-    val('agency', textCell(opp.agency ?? '')),
-    ...(opp.close_date ? [val('close_date', { date: [String(opp.close_date).slice(0, 10)] })] : []),
+    // Slack's rich_text cells reject an empty string outright
+    // (`must be more than 0 characters`) — omit rather than send blank text.
+    ...(opp.agency ? [val('agency', textCell(opp.agency))] : []),
+    ...(isoDate(opp.close_date) ? [val('close_date', { date: [isoDate(opp.close_date)] })] : []),
     ...(opp.award_ceiling ? [val('award_ceiling', { number: [Number(opp.award_ceiling)] })] : []),
     ...(opp.owner_user_id && columns.owner ? [val('owner', { user: [opp.owner_user_id] })] : []),
     ...(opp.fit_score != null && columns.fit ? [val('fit', { number: [opp.fit_score] })] : []),
@@ -152,15 +165,19 @@ export async function reconcileListEdits(client, teamId) {
       const listStage = cellValue(row, columns.stage);
       const listOwner = cellValue(row, columns.owner);
       const listClose = cellValue(row, columns.close_date);
+      let touched = false;
       if (listStage && listStage !== opp.stage) {
         await db.moveOpportunity(teamId, opp.opp_id, listStage);
         await db.logActivity(teamId, opp.opp_id, { actor: 'system', kind: 'list_edit', summary: `Stage changed to ${listStage} in the List` });
+        touched = true;
       }
       if (listOwner && listOwner !== opp.owner_user_id) {
         await db.setOwner(teamId, opp.opp_id, listOwner);
         await db.logActivity(teamId, opp.opp_id, { actor: 'system', kind: 'list_edit', summary: `Owner changed to <@${listOwner}> in the List` });
+        touched = true;
       }
-      if (listClose && listClose !== String(opp.close_date ?? '').slice(0, 10)) {
+      if (touched) refreshOverviewAndRequirements(client, teamId, { ...opp, owner_user_id: listOwner ?? opp.owner_user_id }).catch(() => {});
+      if (listClose && listClose !== isoDate(opp.close_date)) {
         await db.pool.query('UPDATE opportunities SET close_date=$3 WHERE team_id=$1 AND opp_id=$2', [teamId, opp.opp_id, listClose]);
         await db.logActivity(teamId, opp.opp_id, { actor: 'system', kind: 'list_edit', summary: `Deadline changed to ${listClose} in the List` });
       }
