@@ -13,6 +13,7 @@ import { grantsGov } from '../mcp/grantsgov-client.js';
 import { searchWorkspace, detectSearchMode, expandKeywordQuery } from './rts.js';
 import { SYSTEM_PROMPT, renderOrgContext } from '../prompts/system.js';
 import { completeOnce } from './llm.js';
+import { makeThreadStreamer } from './streamer.js';
 
 const executors = new Map();
 
@@ -98,8 +99,13 @@ registerIntentExecutor('draft', async (client, intent) => {
   // tool-call draft whose in-process stash didn't survive a restart —
   // arrive with no markdown yet, so this executor does the full
   // gather-then-generate itself, single completion, outside the tool loop.
+  // Progress goes through the SAME task-timeline stream the main agent loop
+  // uses (live-reported: this used to fire two separate permanent chat
+  // messages — "_Searching…_", "_Drafting…_" — that just piled up in the
+  // thread instead of updating in place like every other action).
+  let streamer = null;
   if (!markdown) {
-    const post = (t) => client.chat.postMessage({ channel: intent.channel_id, thread_ts: intent.message_ts, text: t });
+    streamer = makeThreadStreamer({ client, channel: intent.channel_id, thread_ts: intent.message_ts, userId: intent.requested_by, teamId });
     const [org, pipeline, opp, oppDetails] = await Promise.all([
       db.getOrg(teamId),
       db.listOpportunities(teamId),
@@ -107,7 +113,7 @@ registerIntentExecutor('draft', async (client, intent) => {
       grantsGov.fetchOpportunity(opp_id).catch(() => null),
     ]);
     title = `Letter of Intent — ${opp?.title ?? oppDetails?.title ?? opp_id}`;
-    await post('_Searching your workspace for evidence…_');
+    await streamer.task('Searching your workspace for evidence');
     // Change-scope pinned evidence: exact pointers the user picked — re-read
     // live by ts, used alongside (and listed ahead of) the fresh search.
     const pinnedEvidence = (await Promise.all((pinned ?? []).map((p) => rereadPinned(client, p)))).filter(Boolean);
@@ -116,7 +122,7 @@ registerIntentExecutor('draft', async (client, intent) => {
     const results = await searchWorkspace(client, {
       query: mode === 'keyword' ? expandKeywordQuery(query) : query, contentTypes: ['messages', 'files'],
     }).catch(() => []);
-    await post('_Drafting…_');
+    await streamer.task('Writing the draft');
     const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount: pinnedEvidence.length + results.length, contextChannelId: undefined });
     const userMsg = [
       `Draft the Letter of Intent for this opportunity now — you already have everything you need, do not ask questions.`,
@@ -161,9 +167,10 @@ registerIntentExecutor('draft', async (client, intent) => {
   }
   const checklist = opp?.checklist ?? [];
   const done = checklist.filter((c) => c.done).length;
-  await client.chat.postMessage({
-    channel: intent.channel_id, thread_ts: intent.message_ts,
-    text: `📄 Draft ready: ${title}`,
-    blocks: draftCard({ opp: opp ?? { opp_id, title }, canvasUrl, citations: citations.length, checklistDone: done, checklistTotal: checklist.length }),
-  });
+  const finalBlocks = draftCard({ opp: opp ?? { opp_id, title }, canvasUrl, citations: citations.length, checklistDone: done, checklistTotal: checklist.length });
+  if (streamer) {
+    await streamer.stop({ blocks: finalBlocks });
+  } else {
+    await client.chat.postMessage({ channel: intent.channel_id, thread_ts: intent.message_ts, text: `📄 Draft ready: ${title}`, blocks: finalBlocks });
+  }
 });
