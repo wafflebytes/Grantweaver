@@ -55,9 +55,16 @@ const EVIDENCE_INTENT = /\b(evidence|impact|attendance|gpa|grade|metric|story|st
 // nothing to do with finding new evidence.
 const EVIDENCE_LOOKBACK = /\bevidence (list|locker)\b|\b(list|show|see) (me |the |our |my )*(saved )?evidence\b|\bsaved evidence\b/i;
 
+// "rescan/rebuild the workspace/index" is its own explicit tool
+// (rescan_workspace), which runs several of its own search_workspace calls
+// under the hood — an evidence prefetch ahead of it burns the turn's one-shot
+// action_token before the real tool ever gets to run, so every one of its
+// searches then fails with invalid_action_token and the turn hangs.
+const RESCAN_INTENT = /\b(rescan|rebuild|refresh)\b.{0,20}\b(workspace|index)\b|\b(workspace|evidence) (index|scan)\b/i;
+
 export function looksEvidenceShaped(text) {
   const t = text ?? '';
-  return EVIDENCE_INTENT.test(t) && !EVIDENCE_LOOKBACK.test(t);
+  return EVIDENCE_INTENT.test(t) && !EVIDENCE_LOOKBACK.test(t) && !RESCAN_INTENT.test(t);
 }
 
 export async function runAgentTurn(ctx) {
