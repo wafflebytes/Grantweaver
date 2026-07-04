@@ -79,9 +79,12 @@ header.top .meta{color:var(--on-green);opacity:.85;font-size:.9rem}
 @media (prefers-color-scheme:dark){.hits-badge{color:var(--gold-soft)}}
 .pipeline-card{display:flex;justify-content:space-between;align-items:center}
 .pipeline-card h2{margin:0}
-.pipeline-link{color:var(--gold);font-size:1.7rem;line-height:1;text-decoration:none;display:inline-block}
-.pipeline-link:hover{color:var(--gold-soft)}
-@media (prefers-color-scheme:dark){.pipeline-link{color:var(--gold-soft)}}
+.pipeline-link{color:var(--green-deep);background:var(--gold);font-size:1.3rem;line-height:1;text-decoration:none;
+  width:46px;height:46px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--display);transition:background .15s ease}
+.pipeline-link:hover{background:var(--gold-soft)}
+@media (prefers-color-scheme:dark){.pipeline-link{color:var(--green-deep);background:var(--gold-soft)}
+  .pipeline-link:hover{background:var(--gold)}}
 .badge{font-size:.72rem;padding:2px 8px;border-radius:999px;background:rgba(45,106,79,.12)}
 footer{margin-top:32px;font-size:.82rem;color:var(--muted);text-align:center}
 footer a{color:var(--muted)}
