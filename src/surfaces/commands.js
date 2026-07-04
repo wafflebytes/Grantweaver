@@ -6,6 +6,7 @@ import { orgLinkUrl } from '../services/weblink.js';
 import { runWatchSweep } from '../services/watches.js';
 import { runHarvestSimulate, runUpdateRequestSweep } from './proactive.js';
 import { runDeadlineSweepOnce } from '../services/scheduler.js';
+import { reconcileListEdits } from '../services/lists.js';
 
 function simulateAllowed(userId) {
   const allowed = (process.env.SIMULATE_ALLOWED_USERS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -99,7 +100,14 @@ export function registerCommands(app) {
         await postDigestNow(client, command.team_id);
         return respond({ response_type: 'ephemeral', text: '🧶 Digest posted.' });
       }
-      return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|deadline|digest>`' });
+      if (target === 'sync-list') {
+        // Otherwise only runs on the hourly scheduler sweep — useful to force
+        // right after editing the List by hand, to confirm two-way sync live
+        // instead of waiting up to an hour.
+        await reconcileListEdits(client, command.team_id);
+        return respond({ response_type: 'ephemeral', text: '🧶 Reconciled the pipeline List against any manual edits.' });
+      }
+      return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|deadline|digest|sync-list>`' });
     }
 
     // help + anything unknown → same friendly card (never an error dump)
