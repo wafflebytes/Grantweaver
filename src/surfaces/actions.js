@@ -2,6 +2,7 @@ import { db } from '../services/db.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { runIntent, markCardRunning, markCardCancelled } from '../agent/intents.js';
+import { persistEvidencePointer } from './reactions.js';
 import { addOpportunityFull } from '../agent/tools.js';
 import { refreshOverviewAndRequirements } from '../services/canvas.js';
 import { confirmCard, shareCard, money, fmtDate } from './cards.js';
@@ -169,12 +170,20 @@ export function registerActions(app) {
   app.action('evidence_save', async ({ ack, action, body, client }) => {
     await ack();
     const { c, ts, tag, link } = JSON.parse(action.value);
-    await db.saveEvidence(body.team.id, {
-      channel_id: c, message_ts: ts, permalink: link ?? '', tag: tag ?? 'story', saved_by: body.user.id,
+    // Real gap found in review: this button (used on evidence-suggestion
+    // cards during drafting) called db.saveEvidence directly and skipped
+    // List sync entirely — every other save entry point already went
+    // through persistEvidencePointer. Also the source path for file-only
+    // suggestions (c/ts both '') without this fix would collide with any
+    // other file evidence under the DB's UNIQUE(team_id, channel_id,
+    // message_ts) constraint — see db.saveEvidence's pointer-synthesis fix.
+    const { tagBlocks } = await persistEvidencePointer(client, body.team.id, {
+      channel_id: c, message_ts: ts, permalink: link ?? '', tag: tag ?? 'story', is_file: !c, saved_by: body.user.id,
     });
     await client.chat.postEphemeral({
       channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
-      text: "💾 Evidence pointer saved — I'll re-read it live whenever we draft.",
+      text: 'Saved as evidence 🧶',
+      blocks: tagBlocks,
     });
   });
 

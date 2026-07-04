@@ -11,36 +11,55 @@ async function detectFileMessage(client, channel, ts) {
   }
 }
 
-/** Shared by the 🧵 reaction flow and the "Save as evidence" message shortcut. */
-export async function saveEvidenceFromMessage(client, { teamId, channel, ts, userId }) {
-  const [{ permalink }, isFile, channelInfo] = await Promise.all([
-    client.chat.getPermalink({ channel, message_ts: ts }).catch(() => ({ permalink: '' })),
-    detectFileMessage(client, channel, ts),
-    client.conversations.info({ channel }).catch(() => null),
-  ]);
-  const { listItemId } = await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile, saved_by: userId });
+// File-sourced evidence has no channel/ts (see db.saveEvidence's comment) —
+// mirror the same synthesis here so the tag/undo buttons' values reference
+// the SAME row db.saveEvidence actually wrote, not the raw empty strings.
+function pointerKey(channel_id, message_ts, permalink) {
+  if (!channel_id && !message_ts && permalink) return { channel_id: 'file', message_ts: permalink };
+  return { channel_id, message_ts };
+}
+
+/**
+ * Single save+sync+tag-UI path for all three entry points: the 🧵 reaction,
+ * the message shortcut, and the evidence-suggestion card's "Save as
+ * evidence" button (channel-only message evidence AND file evidence both
+ * route through here now — previously the button path skipped List sync
+ * entirely, live-reported as "why didn't it make the evidence list").
+ */
+export async function persistEvidencePointer(client, teamId, { channel_id, message_ts, permalink, tag = 'story', is_file = false, saved_by }) {
+  const channelInfo = channel_id ? await client.conversations.info({ channel: channel_id }).catch(() => null) : null;
+  const { listItemId } = await db.saveEvidence(teamId, { channel_id, message_ts, permalink, tag, is_file, saved_by });
+  const key = pointerKey(channel_id, message_ts, permalink);
   syncEvidenceToList(client, teamId, {
-    channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile,
-    channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+    ...key, permalink, tag, is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
   }).catch(() => {});
   return {
     permalink,
     tagBlocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: 'Saved as evidence 🧶 — tag it:' } },
+      { type: 'section', text: { type: 'mrkdwn', text: `Saved as evidence 🧶 — tagged _${tag}_.` } },
       { type: 'actions', elements: [
-        ...['metric', 'story', 'testimonial'].map((t) => ({
-          type: 'button', action_id: `evidence_tag:${t}`,
-          value: JSON.stringify({ channel, ts, tag: t }),
-          text: { type: 'plain_text', text: t },
-          accessibility_label: `Tag this evidence as ${t}`,
-        })),
+        { type: 'button', action_id: 'evidence_tag_open',
+          value: JSON.stringify({ ...key, tag }),
+          text: { type: 'plain_text', text: '🏷️ Change tag' },
+          accessibility_label: 'Change this evidence pointer\'s tag' },
         { type: 'button', action_id: 'evidence_undo', style: 'danger',
-          value: JSON.stringify({ channel, ts }),
+          value: JSON.stringify(key),
           text: { type: 'plain_text', text: 'Undo' },
           accessibility_label: 'Remove this evidence pointer' },
       ]},
     ],
   };
+}
+
+/** Shared by the 🧵 reaction flow and the "Save as evidence" message shortcut. */
+export async function saveEvidenceFromMessage(client, { teamId, channel, ts, userId }) {
+  const [{ permalink }, isFile] = await Promise.all([
+    client.chat.getPermalink({ channel, message_ts: ts }).catch(() => ({ permalink: '' })),
+    detectFileMessage(client, channel, ts),
+  ]);
+  return persistEvidencePointer(client, teamId, {
+    channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile, saved_by: userId,
+  });
 }
 
 export function registerReactions(app) {
@@ -79,16 +98,51 @@ export function registerReactions(app) {
     } catch (e) { console.error('[reaction_added]', e?.message ?? e); }
   });
 
-  app.action(/^evidence_tag:/, async ({ ack, action, body, client }) => {
+  // Standardized to a modal (per the same "everything inline is cluttering
+  // the chat" ask that moved Share-to-channel to a modal) — one "Change
+  // tag" button instead of three separate metric/story/testimonial buttons
+  // crowding the message.
+  app.action('evidence_tag_open', async ({ ack, action, body, client }) => {
     await ack();
-    const { channel, ts, tag } = JSON.parse(action.value);
+    const { channel_id, message_ts, tag } = JSON.parse(action.value);
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal', callback_id: 'gw_evidence_tag_submit',
+        private_metadata: JSON.stringify({ channel_id, message_ts }),
+        title: { type: 'plain_text', text: 'Tag evidence' },
+        submit: { type: 'plain_text', text: 'Save' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [{
+          type: 'input', block_id: 'tag',
+          label: { type: 'plain_text', text: 'Type' },
+          element: {
+            type: 'static_select', action_id: 'val',
+            initial_option: { text: { type: 'plain_text', text: tag[0].toUpperCase() + tag.slice(1) }, value: tag },
+            options: ['metric', 'story', 'testimonial'].map((t) => ({
+              text: { type: 'plain_text', text: t[0].toUpperCase() + t.slice(1) }, value: t,
+            })),
+          },
+        }],
+      },
+    }).catch((e) => console.warn('[evidence_tag_open]', e?.data?.error ?? e.message));
+  });
+
+  app.view('gw_evidence_tag_submit', async ({ ack, view, body, client }) => {
+    await ack();
+    const { channel_id, message_ts } = JSON.parse(view.private_metadata || '{}');
+    const tag = view.state.values.tag.val.selected_option.value;
     const teamId = body.team.id;
-    const { listItemId } = await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, tag, saved_by: body.user.id });
     // Live gap found in review: a retag never touched the List row, so its
     // Type column silently went stale the moment someone re-tagged.
-    const channelInfo = await client.conversations.info({ channel }).catch(() => null);
+    const { listItemId } = await db.saveEvidence(teamId, { channel_id, message_ts, tag, saved_by: body.user.id });
+    const channelInfo = channel_id !== 'file' ? await client.conversations.info({ channel: channel_id }).catch(() => null) : null;
     syncEvidenceToList(client, teamId, {
-      channel_id: channel, message_ts: ts, tag, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+      channel_id, message_ts, tag, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+    }).catch(() => {});
+    await client.chat.postEphemeral({
+      channel: channel_id !== 'file' ? channel_id : body.user.id, user: body.user.id,
+      text: `Tagged as _${tag}_. 🧶`,
     }).catch(() => {});
   });
 

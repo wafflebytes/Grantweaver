@@ -330,6 +330,17 @@ export const db = {
   // ── evidence: POINTERS ONLY ────────────────────────────────────────
   // This DAL must never accept content. Guard enforces it at runtime too.
   async saveEvidence(teamId, ptr) {
+    // File-sourced evidence (Slack search returns no message pointer for
+    // files, only a permalink — see rts.js's normalizeRtsResult) always
+    // arrives with channel_id/message_ts both ''. The UNIQUE(team_id,
+    // channel_id, message_ts) constraint then made every second file save
+    // silently UPDATE the first one instead of inserting a new row
+    // (live-reported: two distinct file evidence saves collapsed into one).
+    // Synthesize a unique pointer from the permalink so each file gets its
+    // own row.
+    if (!ptr.channel_id && !ptr.message_ts && ptr.permalink) {
+      ptr = { ...ptr, channel_id: 'file', message_ts: ptr.permalink };
+    }
     for (const k of ['text', 'snippet', 'content', 'message']) {
       if (k in ptr) throw new Error(`COMPLIANCE VIOLATION: evidence pointer may not contain "${k}"`);
     }
