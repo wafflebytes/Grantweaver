@@ -45,10 +45,6 @@ export function buildSuggestedPrompts({ org, pipeline = [] }) {
   return prompts.slice(0, 4);
 }
 
-// Per-process de-dupe so a repeat DM-open doesn't re-greet every time.
-// onboarding.js owns the real first-touch/org-aware welcome flow.
-const greeted = new Set();
-
 export function registerAssistant(app) {
   app.event('app_home_opened', async ({ event, client, context }) => {
     if (event.tab !== 'messages') return;
@@ -61,8 +57,12 @@ export function registerAssistant(app) {
         prompts: buildSuggestedPrompts({ org, pipeline }),
       });
 
-      if (greeted.has(event.user)) return;
-      greeted.add(event.user);
+      // Persisted, not an in-process Set — a Set gets wiped on every
+      // deploy/restart, which was re-triggering this greeting on the next
+      // app_home_opened after every redeploy (live-reported as constant
+      // greeting spam during a night with many deploys).
+      if (context.teamId && await db.hasGreeted(context.teamId, event.user)) return;
+      if (context.teamId) await db.markGreeted(context.teamId, event.user);
 
       await client.chat.postMessage({
         channel: event.channel,

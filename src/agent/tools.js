@@ -3,7 +3,7 @@ import { grantsGov } from '../mcp/grantsgov-client.js';
 import { db } from '../services/db.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { ensureOppCanvas, refreshOverviewAndRequirements } from '../services/canvas.js';
-import { grantCardV2, forecastCard, evidenceCardV2, confirmCard } from '../surfaces/cards.js';
+import { grantCardV2, forecastCard, evidenceCardV2, confirmCard, pipelineCard } from '../surfaces/cards.js';
 import { stashDraftMarkdown } from './intents.js';
 import { assessFitBatch, extractChecklist } from '../prompts/classifiers.js';
 import { runWorkspaceScan } from '../services/scan.js';
@@ -77,14 +77,14 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'pipeline',
-    description: "Read or update the org's grant pipeline. actions: list | add (needs opp object) | move (opp_id + stage: suggested|reviewing|drafting|submitted|awarded|declined).",
+    description: "Read or update the org's grant pipeline. actions: list | add (needs opp object; defaults to Reviewing unless stage is given) | move (opp_id + stage: suggested|reviewing|drafting|submitted|awarded|declined). Moving to 'drafting' fires the draft confirm card automatically — don't ALSO call create_draft_canvas right after.",
     input_schema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['list', 'add', 'move'] },
         opp: { type: 'object', description: 'For add: {opp_id, opp_number, title, agency, close_date, award_ceiling, url}' },
         opp_id: { type: 'string' },
-        stage: { type: 'string', enum: ['suggested', 'reviewing', 'drafting', 'submitted', 'awarded', 'declined'] },
+        stage: { type: 'string', enum: ['suggested', 'reviewing', 'drafting', 'submitted', 'awarded', 'declined'], description: 'On add: the stage to file it under (default reviewing). On move: the target stage.' },
         owner_user_id: { type: 'string', description: 'Assign an owner via chat, e.g. "assign the OJJDP one to @maya" — accepted on add/move.' },
         checklist_done: { type: 'array', items: { type: 'string' }, description: 'Checklist item ids to mark complete (e.g. after the user reports progress like "we registered on SAM.gov").' },
       },
@@ -101,6 +101,7 @@ export const TOOL_SCHEMAS = [
         channel_id: { type: 'string' }, message_ts: { type: 'string' },
         permalink: { type: 'string' },
         tag: { type: 'string', enum: ['metric', 'story', 'testimonial', 'other'] },
+        is_file: { type: 'boolean', description: 'True if the search_workspace result being saved was a file/photo hit, not a message' },
       },
       required: ['action'],
     },
@@ -256,13 +257,33 @@ export function buildToolbelt(ctx) {
 
     async pipeline({ action, opp, opp_id, stage, owner_user_id, checklist_done }) {
       if (!teamId) return { error: 'No team context' };
+      const fireDraftConfirm = async (id, title) => {
+        const intent = await db.createIntent(teamId, { kind: 'draft', params: { opp_id: id }, requested_by: userId, channel_id: channelId });
+        const posted = await say({
+          text: 'Ready to draft',
+          blocks: confirmCard(intent, { summary: `LOI for *${title}* — I'll gather fresh evidence and write it into the opportunity's canvas.`, etaSeconds: 40 }),
+        }).catch(() => null);
+        if (posted?.ts) await db.setIntentMessage(intent.id, posted.ts);
+      };
       if (action === 'list') return { pipeline: await db.listOpportunities(teamId) };
       if (action === 'add') {
         if (!opp?.opp_id || !opp?.title) return { error: 'add requires opp.opp_id and opp.title' };
-        await addOpportunityFull(client, teamId, { ...opp, added_by: userId, owner_user_id });
-        return { ok: true, added: opp.title, stage: 'reviewing' };
+        const targetStage = stage ?? 'reviewing';
+        const added = await addOpportunityFull(client, teamId, { ...opp, added_by: userId, owner_user_id, channelId });
+        if (targetStage !== 'reviewing') {
+          await db.moveOpportunity(teamId, opp.opp_id, targetStage);
+          // addOpportunityFull already synced the List row once, at the
+          // default Reviewing stage — re-sync now the stage actually changed.
+          const moved = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp.opp_id));
+          if (moved) syncOpportunityToList(client, teamId, moved).catch(() => {});
+        }
+        const saved = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp.opp_id)) ?? added;
+        if (saved) await say({ text: saved.title, blocks: pipelineCard(saved) }).catch(() => {});
+        if (targetStage === 'drafting') await fireDraftConfirm(opp.opp_id, saved?.title ?? opp.title);
+        return { ok: true, added: opp.title, stage: targetStage };
       }
       if (action === 'move') {
+        const before = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp_id));
         await db.moveOpportunity(teamId, opp_id, stage);
         if (owner_user_id) await db.setOwner(teamId, opp_id, owner_user_id);
         if (checklist_done?.length) {
@@ -273,6 +294,7 @@ export function buildToolbelt(ctx) {
           syncOpportunityToList(client, teamId, moved).catch(() => {});
           if (owner_user_id || checklist_done?.length) refreshOverviewAndRequirements(client, teamId, moved).catch(() => {});
         }
+        if (stage === 'drafting' && before?.stage !== 'drafting') await fireDraftConfirm(opp_id, moved?.title ?? opp_id);
         return { ok: true, opp_id, stage };
       }
       return { error: `unknown action ${action}` };
@@ -310,11 +332,11 @@ export function buildToolbelt(ctx) {
       return { ok: true, ...summary, note: `Evidence index rebuilt: ${summary.totalHits} hit(s) across ${summary.channelsCovered} channel(s). Tell the user, and mention the /org web page shows the full breakdown.` };
     },
 
-    async evidence_locker({ action, channel_id, message_ts, permalink, tag = 'story' }) {
+    async evidence_locker({ action, channel_id, message_ts, permalink, tag = 'story', is_file = false }) {
       if (!teamId) return { error: 'No team context' };
       if (action === 'list') return { pointers: await db.listEvidence(teamId) };
       if (!channel_id || !message_ts) return { error: 'save requires channel_id and message_ts' };
-      await db.saveEvidence(teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, saved_by: userId });
+      await db.saveEvidence(teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, saved_by: userId });
       return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored).' };
     },
 

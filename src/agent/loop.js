@@ -19,6 +19,7 @@ const TASK_LABELS = {
 };
 
 const MAX_TURNS = 8;
+const STRENGTH_RANK = { star: 0, solid: 1, weak: 2 };
 
 // TOOL_SCHEMAS stay in our internal {name, description, input_schema} shape;
 // adapt once here to the OpenAI function-tool wire format.
@@ -69,15 +70,25 @@ export async function runAgentTurn(ctx) {
         })
       : Promise.resolve([]);
 
-  const [org, pipeline, evidenceCount, prefetch, history] = await Promise.all([
+  const [org, pipeline, evidenceCount, evidenceIndex, prefetch, history] = await Promise.all([
     ctx.teamId ? db.getOrg(ctx.teamId) : null,
     ctx.teamId ? db.listOpportunities(ctx.teamId) : [],
     ctx.teamId ? db.countEvidence(ctx.teamId) : 0,
+    ctx.teamId ? db.listIndex(ctx.teamId) : [],
     prefetchPromise,
     historyPromise,
   ]);
+  const evidenceThemes = Object.values(
+    evidenceIndex.reduce((acc, row) => {
+      const cur = acc[row.theme] ?? { theme: row.theme, hits: 0, strength: row.strength };
+      cur.hits += row.hits ?? 0;
+      if (STRENGTH_RANK[row.strength] < STRENGTH_RANK[cur.strength]) cur.strength = row.strength;
+      acc[row.theme] = cur;
+      return acc;
+    }, {})
+  );
 
-  const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount, contextChannelId: ctx.contextChannelId });
+  const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount, evidenceThemes, contextChannelId: ctx.contextChannelId });
   const messages = [
     { role: 'system', content: system },
     ...history,

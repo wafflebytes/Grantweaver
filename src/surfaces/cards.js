@@ -151,12 +151,14 @@ export function draftCard({ opp, canvasUrl, citations = 0, checklistDone = 0, ch
       elements: [
         { type: 'button', style: 'primary', url: canvasUrl, action_id: 'gw:draft:open',
           text: { type: 'plain_text', text: 'Open Canvas' }, accessibility_label: `Open the canvas for ${opp.title}` },
+        { type: 'button', action_id: 'gw:draft:submit', value: JSON.stringify({ o: String(opp.opp_id) }),
+          text: { type: 'plain_text', text: '✅ Mark as submitted' },
+          accessibility_label: `Mark the ${opp.title} draft as submitted` },
         { type: 'button', action_id: 'gw:draft:revise', value: JSON.stringify({ o: String(opp.opp_id) }),
           text: { type: 'plain_text', text: 'Request changes' }, accessibility_label: `Request changes to the ${opp.title} draft` },
         {
           type: 'overflow', action_id: 'gw:draft:overflow',
           options: [
-            { text: { type: 'plain_text', text: 'Mark ready' }, value: JSON.stringify({ o: String(opp.opp_id), v: 'gw:draft:ready' }) },
             { text: { type: 'plain_text', text: 'Export .md pack' }, value: JSON.stringify({ o: String(opp.opp_id), v: 'gw:export:md' }) },
             { text: { type: 'plain_text', text: 'Copy-ready answers' }, value: JSON.stringify({ o: String(opp.opp_id), v: 'gw:export:answers' }) },
             { text: { type: 'plain_text', text: 'Share to channel' }, value: JSON.stringify({ o: String(opp.opp_id), v: 'gw:export:share' }) },
@@ -180,7 +182,7 @@ export function evidenceCardV2(ev, { pipeline = [] } = {}) {
       type: 'actions',
       elements: [
         { type: 'button', style: 'primary', action_id: 'gw:ev:save',
-          value: JSON.stringify({ c: ev.channel_id, ts: ev.message_ts, tag: ev.tag, link: ev.permalink }),
+          value: JSON.stringify({ c: ev.channel_id, ts: ev.message_ts, tag: ev.tag, link: ev.permalink, f: ev.kind === 'file' || !ev.channel_id }),
           text: { type: 'plain_text', text: '💾 Save as evidence' },
           accessibility_label: 'Save a pointer to this message in the evidence locker' },
         ...(pipeline.length ? [{

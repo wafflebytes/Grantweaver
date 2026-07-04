@@ -58,7 +58,10 @@ overworked; respect their time. Sound like a trusted colleague, not a consultant
   GPA survey" beats "impact"). NEVER write OR-syntax yourself: semantic queries
   are one plain sentence, and keyword expansion is the tool's job, not yours.
   If the first search is thin, run exactly ONE
-  refined variant before concluding. Suggest saving strong finds to the locker.
+  refined variant before concluding. Suggest saving strong finds to the locker
+  — when calling evidence_locker's save action on a result whose kind was
+  'file' (a PDF, photo, etc., not a plain message), pass is_file: true so it
+  surfaces under the files/photos evidence theme, not lumped in with messages.
 - DRAFTING → the workspace-search credential expires quickly (same TIMING
   MATTERS rule as EVIDENCE above), so gather in THIS order: (1)
   search_workspace FIRST — using the SAME concrete-noun query discipline as
@@ -72,7 +75,13 @@ overworked; respect their time. Sound like a trusted colleague, not a consultant
   following the templates below. After creating, summarize: what's cited,
   what needs human judgment (budgets, staffing), next step.
 - PIPELINE → keep it current. After add/move, confirm in one short line and
-  mention the Home tab.
+  mention the Home tab. The user can ALWAYS move a stage just by asking in
+  chat ("mark this as submitted", "move the OJJDP one to drafting") — call
+  the pipeline tool's move action yourself, don't tell them to click a
+  button instead. Resolve "this one"/"this" from context: a prior message in
+  this thread may carry an "[opportunity id(s) in this card: ...]" note, or
+  match by title against the pipeline list above — if genuinely ambiguous
+  between two opportunities, ask which one in one short line.
 - EVIDENCE INDEX STALE/EMPTY → rescan_workspace rebuilds it on demand (not
   just during onboarding). Use it when the user asks to rebuild, refresh,
   or rescan the index, or says it looks empty or out of date.
@@ -185,14 +194,28 @@ CONFIRM]'. Which do you prefer?"
 "Our data shows a 40% improvement in outcomes across all programs." ← no
 source, invented aggregate, overclaimed scope.`;
 
-export function renderOrgContext({ org, pipeline, evidenceCount, contextChannelId }) {
+export function renderOrgContext({ org, pipeline, evidenceCount, evidenceThemes, contextChannelId }) {
   const today = new Date().toISOString().slice(0, 10);
+  // RAG-shaped, on purpose: this is a compact INDEX (theme + strength + hit
+  // count), never raw text — content is always re-fetched live via
+  // search_workspace right before it's used. Curated (human :thread:-saved,
+  // "📌 Saved ...") themes are split from raw scan-derived ones so the model
+  // treats them with different trust: a human already vouched for the
+  // former, the latter is only a "something's probably here" discovery
+  // signal from an automated scan.
+  const curated = (evidenceThemes ?? []).filter((t) => t.theme.startsWith('📌'));
+  const scanned = (evidenceThemes ?? []).filter((t) => !t.theme.startsWith('📌'));
+  const fmtTheme = (t) => `${t.strength === 'star' ? '⭐' : t.strength === 'solid' ? '●' : '○'} ${t.theme} (${t.hits} hit${t.hits === 1 ? '' : 's'})`;
   const lines = [
     '', '## Current organization context (Grantweaver records — not Slack content)',
     `Organization: ${org?.org_name ?? 'not set up yet'}`,
     `Mission: ${org?.mission ?? 'unknown — suggest /grantweaver setup once, gently'}`,
     `Focus areas: ${org?.focus_areas?.join(', ') || '—'} · State: ${org?.state ?? '—'} · Team size: ${org?.org_size ?? '—'}`,
-    `Evidence locker: ${evidenceCount} saved pointer${evidenceCount === 1 ? '' : 's'}`,
+    `Evidence locker: ${evidenceCount} saved pointer${evidenceCount === 1 ? '' : 's'} (explicitly saved by a human, e.g. via :thread: reaction — re-read live via search_workspace before citing)`,
+    curated.length
+      ? `Curated evidence (human-vouched-for, cite these with confidence once re-read): ${curated.map(fmtTheme).join(', ')}`
+      : null,
+    `Auto-scanned evidence themes (discovery signal only, from the last workspace scan — NOT verified, NOT live text; treat as "worth checking with search_workspace," not as a citable fact): ${scanned.length ? scanned.map(fmtTheme).join(', ') : 'not scanned yet — call rescan_workspace or suggest the user run one'}`,
     `Pipeline (${pipeline.length} opportunities):`,
     ...pipeline.map((o) =>
       `- [${o.stage}] ${o.title} — ${o.agency ?? '?'} — closes ${o.close_date ?? '?'} — ceiling $${Number(o.award_ceiling ?? 0).toLocaleString()}${o.canvas_id ? ' (draft exists)' : ''} (opp_id: ${o.opp_id})`),

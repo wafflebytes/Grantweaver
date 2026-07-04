@@ -7,6 +7,16 @@ const pool = new pg.Pool({
   max: 10,
 });
 
+// Manual evidence saves land in the same evidence_index the org page
+// renders, under a fixed "📌 Saved ..." theme rather than the scan's
+// free-form theme names — file/photo saves get their own theme so they
+// surface distinctly, per the ask to foreground files/images.
+function evidenceSaveTheme(tag, isFile) {
+  if (isFile) return '📌 Saved files & photos';
+  const labels = { metric: '📌 Saved metrics', story: '📌 Saved stories', testimonial: '📌 Saved testimonials' };
+  return labels[tag] ?? '📌 Saved evidence';
+}
+
 // Grants.gov close_date arrives in several shapes across endpoints
 // ("10/16/2026" from search2, "Aug 17, 2026 12:00:00 AM EDT" from
 // fetchOpportunity) and the model itself sometimes forwards a raw
@@ -38,6 +48,16 @@ export const db = {
   async allOrgs() {
     const { rows } = await pool.query('SELECT * FROM orgs');
     return rows;
+  },
+  async hasGreeted(teamId, userId) {
+    const org = await this.getOrg(teamId);
+    return Boolean(org?.greeted_users?.includes(userId));
+  },
+  async markGreeted(teamId, userId) {
+    await pool.query(
+      `UPDATE orgs SET greeted_users = array_append(greeted_users, $2)
+       WHERE team_id=$1 AND NOT ($2 = ANY(COALESCE(greeted_users, '{}')))`,
+      [teamId, userId]);
   },
   async upsertOrg(teamId, fields) {
     const cur = (await this.getOrg(teamId)) ?? {};
@@ -290,13 +310,40 @@ export const db = {
     for (const k of ['text', 'snippet', 'content', 'message']) {
       if (k in ptr) throw new Error(`COMPLIANCE VIOLATION: evidence pointer may not contain "${k}"`);
     }
-    await pool.query(
-      `INSERT INTO evidence_pointers (team_id, channel_id, message_ts, permalink, tag, saved_by)
-       VALUES ($1,$2,$3,$4,$5,$6)
+    const { rows } = await pool.query(
+      `INSERT INTO evidence_pointers (team_id, channel_id, message_ts, permalink, tag, saved_by, is_file)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (team_id, channel_id, message_ts) DO UPDATE SET
          tag=EXCLUDED.tag,
-         permalink=CASE WHEN EXCLUDED.permalink <> '' THEN EXCLUDED.permalink ELSE evidence_pointers.permalink END`,
-      [teamId, ptr.channel_id, ptr.message_ts, ptr.permalink ?? '', ptr.tag ?? 'story', ptr.saved_by ?? null]);
+         permalink=CASE WHEN EXCLUDED.permalink <> '' THEN EXCLUDED.permalink ELSE evidence_pointers.permalink END,
+         is_file=evidence_pointers.is_file OR EXCLUDED.is_file
+       RETURNING (xmax = 0) AS inserted`,
+      [teamId, ptr.channel_id, ptr.message_ts, ptr.permalink ?? '', ptr.tag ?? 'story', ptr.saved_by ?? null, ptr.is_file ?? false]);
+    // Close the loop: a human's manual save now strengthens the SAME evidence
+    // index the org page renders, instead of only bumping an invisible
+    // locker count. Only on the true first save of this pointer — a later
+    // retag (evidence_tag buttons) relabels the pointer but doesn't re-bump,
+    // to avoid double-counting one saved item as multiple "hits".
+    if (rows[0]?.inserted) {
+      await this.bumpIndexFromEvidence(teamId, {
+        theme: evidenceSaveTheme(ptr.tag, ptr.is_file),
+        channel_id: ptr.channel_id, permalink: ptr.permalink, is_file: ptr.is_file ?? false,
+      });
+    }
+  },
+  async bumpIndexFromEvidence(teamId, { theme, channel_id, permalink, is_file }) {
+    const { rows } = await pool.query(
+      'SELECT hits, permalinks, has_files FROM evidence_index WHERE team_id=$1 AND theme=$2 AND channel_id=$3',
+      [teamId, theme, channel_id]);
+    const existing = rows[0];
+    const hits = (existing?.hits ?? 0) + 1;
+    const permalinks = existing?.permalinks ?? [];
+    if (permalink && !permalinks.includes(permalink) && permalinks.length < 5) permalinks.push(permalink);
+    await this.upsertIndexRow(teamId, {
+      theme, channel_id, channel_name: null,
+      strength: hits >= 5 ? 'star' : hits >= 2 ? 'solid' : 'weak',
+      hits, permalinks, has_files: Boolean(existing?.has_files) || Boolean(is_file),
+    });
   },
   async listEvidence(teamId, limit = 20) {
     const { rows } = await pool.query(

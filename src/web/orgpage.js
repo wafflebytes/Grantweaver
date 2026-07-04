@@ -17,7 +17,7 @@ function themeRows(index) {
   for (const row of index) {
     if (!byTheme.has(row.theme)) byTheme.set(row.theme, { theme: row.theme, channels: [], strength: row.strength, hits: 0, hasFiles: false, permalinks: [] });
     const t = byTheme.get(row.theme);
-    t.channels.push(row.channel_name ? `#${row.channel_name}` : `#${row.channel_id}`);
+    t.channels.push(row.channel_name ? `#${row.channel_name}` : row.channel_id ? `#${row.channel_id}` : '📎 file (no channel)');
     t.hits += row.hits ?? 0;
     t.hasFiles = t.hasFiles || row.has_files;
     t.permalinks.push(...(row.permalinks ?? []));
@@ -133,6 +133,7 @@ export async function renderOrgPage(teamId) {
   </div>
   <div class="card">
     <h2>Evidence Index</h2>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:6px">⭐ strong · ● solid · ○ worth building. Bar length tracks how many times each theme turned up.</p>
     ${themeHtml}
   </div>
   <div class="card">

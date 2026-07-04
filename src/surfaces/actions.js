@@ -36,6 +36,33 @@ async function markButtonDone(client, body, actionId, newLabel) {
   await client.chat.update({ channel: body.channel.id, ts: body.message.ts, blocks, text: body.message.text }).catch(() => {});
 }
 const NOT_RELEVANT_REASONS = ['Wrong focus area', 'Award too large for us', 'Award too small', "We're not eligible", 'Other (tell me)'];
+const ADD_STAGES = [
+  { value: 'reviewing', label: 'Reviewing — still deciding whether to pursue this' },
+  { value: 'drafting', label: "Drafting — we're writing the proposal now" },
+  { value: 'submitted', label: 'Submitted — already sent, just logging it' },
+];
+
+// Live-reported ask: clicking "Add to pipeline" always silently landed the
+// grant in Reviewing with no way to say "actually we're already drafting
+// this." A modal is worth the extra click here since the answer changes
+// what happens next (drafting auto-fires the draft-proposal confirm card).
+async function openAddStageModal(client, { trigger_id, o, channel, thread_ts }) {
+  await client.views.open({
+    trigger_id,
+    view: {
+      type: 'modal', callback_id: 'gw_add_stage_submit',
+      private_metadata: JSON.stringify({ o, channel, thread_ts }),
+      title: { type: 'plain_text', text: 'Add to pipeline' },
+      submit: { type: 'plain_text', text: 'Add' }, close: { type: 'plain_text', text: 'Cancel' },
+      blocks: [
+        { type: 'input', block_id: 'stage', label: { type: 'plain_text', text: 'Where does this stand?' },
+          element: { type: 'radio_buttons', action_id: 'value', initial_option:
+            { text: { type: 'plain_text', text: ADD_STAGES[0].label }, value: ADD_STAGES[0].value },
+            options: ADD_STAGES.map((s) => ({ text: { type: 'plain_text', text: s.label }, value: s.value })) } },
+      ],
+    },
+  });
+}
 
 async function canvasLink(client, canvasId) {
   const { team } = await client.team.info();
@@ -159,23 +186,49 @@ export function registerActions(app) {
   app.action('gw:grant:add', async ({ ack, action, body, client }) => {
     await ack();
     const { o } = val(action);
-    const teamId = body.team.id, thread_ts = replyTarget(body);
+    await openAddStageModal(client, { trigger_id: body.trigger_id, o, channel: body.channel.id, thread_ts: replyTarget(body) });
+  });
+
+  app.view('gw_add_stage_submit', async ({ ack, body, view, client }) => {
+    await ack();
+    const { o, channel, thread_ts } = JSON.parse(view.private_metadata || '{}');
+    const stage = view.state.values.stage.value.selected_option?.value ?? 'reviewing';
+    const teamId = body.team.id;
     try {
       const d = await grantsGov.fetchOpportunity(o);
       await addOpportunityFull(client, teamId, {
         opp_id: o, opp_number: d.opp_number, title: d.title, agency: d.agency,
         close_date: d.close_date, award_ceiling: d.award_ceiling,
         url: `https://grants.gov/search-results-detail/${o}`, added_by: body.user.id,
-        channelId: body.channel.id,
+        channelId: channel,
       });
-      await markButtonDone(client, body, 'gw:grant:add', '✅ Added');
+      if (stage !== 'reviewing') {
+        await db.moveOpportunity(teamId, o, stage);
+        // addOpportunityFull already synced the List row once, at the default
+        // Reviewing stage — re-sync now the stage actually changed, or the
+        // List keeps showing Reviewing until something else touches this row.
+        const moved = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
+        if (moved) syncOpportunityToList(client, teamId, moved).catch(() => {});
+      }
+      const stageLabel = stage[0].toUpperCase() + stage.slice(1);
       await client.chat.postMessage({
-        channel: body.channel.id, thread_ts,
-        text: `➕ Added *${d.title}* to your pipeline (Reviewing) — canvas created, checklist + fit filling in. See it on my Home tab.`,
+        channel, thread_ts,
+        text: `➕ Added *${d.title}* to your pipeline (${stageLabel}) — canvas created, checklist + fit filling in. See it on my Home tab.`,
       });
+      // Closes the loop: moving straight to Drafting shouldn't require a
+      // separate ask — fire the same confirm-before-generate card the
+      // pipeline's "Draft proposal" button uses, right away.
+      if (stage === 'drafting') {
+        const intent = await db.createIntent(teamId, { kind: 'draft', params: { opp_id: o }, requested_by: body.user.id, channel_id: channel });
+        const posted = await client.chat.postMessage({
+          channel, thread_ts, text: 'Ready to draft',
+          blocks: confirmCard(intent, { summary: `LOI for *${d.title}* — I'll gather fresh evidence and write it into the opportunity's canvas.`, etaSeconds: 40 }),
+        });
+        await db.setIntentMessage(intent.id, posted.ts);
+      }
     } catch (e) {
       console.error('[gw:grant:add]', e?.message ?? e);
-      await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts,
+      await client.chat.postMessage({ channel, thread_ts,
         text: "I couldn't add that just now (Grants.gov hiccup). Try again in a minute. 🧶" });
     }
   });
@@ -292,13 +345,23 @@ export function registerActions(app) {
   app.action('gw:pipe:stage', async ({ ack, action, body, client }) => {
     await ack();
     const { o, stage } = JSON.parse(action.selected_option.value);
-    const teamId = body.team.id;
+    const teamId = body.team.id, channel = body.channel.id, thread_ts = replyTarget(body);
+    const before = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     await db.moveOpportunity(teamId, o, stage);
     await db.logActivity(teamId, o, { actor: body.user.id, kind: 'stage_move', summary: `Stage → ${stage} (moved by <@${body.user.id}>)` });
     const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     if (opp) syncOpportunityToList(client, teamId, opp).catch(() => {});
-    await client.chat.postMessage({ channel: body.channel.id, thread_ts: replyTarget(body),
-      text: `Moved *${opp?.title ?? o}* → _${stage}_.` });
+    await client.chat.postMessage({ channel, thread_ts, text: `Moved *${opp?.title ?? o}* → _${stage}_.` });
+    // Same auto-draft as the add-to-pipeline modal — moving INTO drafting
+    // (not already there) fires the draft confirm card right away.
+    if (stage === 'drafting' && before?.stage !== 'drafting') {
+      const intent = await db.createIntent(teamId, { kind: 'draft', params: { opp_id: o }, requested_by: body.user.id, channel_id: channel });
+      const posted = await client.chat.postMessage({
+        channel, thread_ts, text: 'Ready to draft',
+        blocks: confirmCard(intent, { summary: `LOI for *${opp?.title ?? o}* — I'll gather fresh evidence and write it into the opportunity's canvas.`, etaSeconds: 40 }),
+      });
+      await db.setIntentMessage(intent.id, posted.ts);
+    }
   });
 
   async function askOwnerPick(client, { o, channel, user, thread_ts }) {
@@ -379,6 +442,8 @@ export function registerActions(app) {
   async function removeOpp(client, { o, teamId, channel, user, thread_ts }) {
     await db.moveOpportunity(teamId, o, 'declined');
     await db.logActivity(teamId, o, { actor: user, kind: 'stage_move', summary: `Removed (declined) by <@${user}>` });
+    const declined = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
+    if (declined) syncOpportunityToList(client, teamId, declined).catch(() => {});
     await client.chat.postEphemeral({ channel, user, thread_ts,
       text: 'Removed from the active pipeline (kept as declined, never deleted).' });
   }
@@ -468,6 +533,14 @@ export function registerActions(app) {
     }
     await db.moveOpportunity(teamId, o, 'submitted');
     await db.logActivity(teamId, o, { actor, kind: 'stage_move', summary: 'Marked ready → submitted' });
+    // Closes the loop everywhere the pipeline shows up: the List row and the
+    // canvas's own overview section, not just the DB the Home tab/org page
+    // already read live.
+    const moved = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
+    if (moved) {
+      await syncOpportunityToList(app.client, teamId, moved).catch(() => {});
+      await refreshOverviewAndRequirements(app.client, teamId, moved).catch(() => {});
+    }
     await app.client.chat.postMessage({ channel, thread_ts, text: `🎉 Marked *${opp?.title ?? o}* as submitted. Nice work.` });
   }
 
@@ -477,13 +550,18 @@ export function registerActions(app) {
     await markReadyOrWarn({ o, teamId: body.team.id, channel: body.channel.id, thread_ts: replyTarget(body), actor: body.user.id });
   });
 
-  // draftCard's overflow: Mark ready · Export .md pack · Copy-ready answers · Share to channel
+  app.action('gw:draft:submit', async ({ ack, action, body }) => {
+    await ack();
+    const { o } = val(action);
+    await markReadyOrWarn({ o, teamId: body.team.id, channel: body.channel.id, thread_ts: replyTarget(body), actor: body.user.id });
+  });
+
+  // draftCard's overflow: Export .md pack · Copy-ready answers · Share to channel
   app.action('gw:draft:overflow', async ({ ack, action, body, client }) => {
     await ack();
     const { o, v } = JSON.parse(action.selected_option.value);
     const teamId = body.team.id, channel = body.channel.id, thread_ts = replyTarget(body), requestedBy = body.user.id;
-    if (v === 'gw:draft:ready') await markReadyOrWarn({ o, teamId, channel, thread_ts, actor: requestedBy });
-    else if (v === 'gw:export:md') await doExportMd({ o, teamId, channel, thread_ts, requestedBy });
+    if (v === 'gw:export:md') await doExportMd({ o, teamId, channel, thread_ts, requestedBy });
     else if (v === 'gw:export:answers') await doExportAnswers({ o, teamId, channel, thread_ts, requestedBy });
     else if (v === 'gw:export:share') await openSharePicker(client, { o, channel, user: requestedBy, thread_ts });
   });
@@ -491,8 +569,8 @@ export function registerActions(app) {
   // ── gw:ev:* ────────────────────────────────────────────────────────
   app.action('gw:ev:save', async ({ ack, action, body, client }) => {
     await ack();
-    const { c, ts, tag, link } = JSON.parse(action.value);
-    await db.saveEvidence(body.team.id, { channel_id: c, message_ts: ts, permalink: link ?? '', tag: tag ?? 'story', saved_by: body.user.id });
+    const { c, ts, tag, link, f } = JSON.parse(action.value);
+    await db.saveEvidence(body.team.id, { channel_id: c, message_ts: ts, permalink: link ?? '', tag: tag ?? 'story', is_file: Boolean(f), saved_by: body.user.id });
     await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
       text: "💾 Evidence pointer saved — I'll re-read it live whenever we draft." });
   });

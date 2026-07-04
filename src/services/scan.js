@@ -57,7 +57,7 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
         : results;
       for (const r of scoped) {
         collected.push({
-          query_label: q.label, channel_id: r.channel_id || 'unknown', channel_name: r.channel_name || null,
+          query_label: q.label, channel_id: r.channel_id || '', channel_name: r.channel_name || null,
           permalink: r.permalink, snippet: r.snippet, is_file: r.kind === 'file',
         });
       }

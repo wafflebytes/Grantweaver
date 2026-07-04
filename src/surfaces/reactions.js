@@ -1,10 +1,22 @@
 import { db } from '../services/db.js';
 import { runIntent, markCardRunning } from '../agent/intents.js';
 
+async function detectFileMessage(client, channel, ts) {
+  try {
+    const { messages = [] } = await client.conversations.history({ channel, latest: ts, inclusive: true, limit: 1 });
+    return Boolean(messages[0]?.files?.length);
+  } catch {
+    return false;
+  }
+}
+
 /** Shared by the 🧵 reaction flow and the "Save as evidence" message shortcut. */
 export async function saveEvidenceFromMessage(client, { teamId, channel, ts, userId }) {
-  const { permalink } = await client.chat.getPermalink({ channel, message_ts: ts }).catch(() => ({ permalink: '' }));
-  await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, permalink, tag: 'story', saved_by: userId });
+  const [{ permalink }, isFile] = await Promise.all([
+    client.chat.getPermalink({ channel, message_ts: ts }).catch(() => ({ permalink: '' })),
+    detectFileMessage(client, channel, ts),
+  ]);
+  await db.saveEvidence(teamId, { channel_id: channel, message_ts: ts, permalink, tag: 'story', is_file: isFile, saved_by: userId });
   return {
     permalink,
     tagBlocks: [
