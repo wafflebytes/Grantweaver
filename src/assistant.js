@@ -113,7 +113,7 @@ export function registerAssistant(app) {
         messageTs: message.ts,
         botUserId: context.botUserId,
         userText: message.text ?? '',
-        makeStreamer: () => makeDmStreamer({ sayStream }),
+        makeStreamer: () => makeDmStreamer({ sayStream, setStatus }),
       });
 
       console.log(`[turn] ${Date.now() - t0}ms tools=${result?.toolCalls ?? 0}`);

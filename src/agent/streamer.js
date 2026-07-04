@@ -4,15 +4,25 @@
 // italic line in the DM (agent_view sayStream has no task-chunk concept).
 let taskSeq = 0;
 
-export function makeDmStreamer({ sayStream }) {
+export function makeDmStreamer({ sayStream, setStatus }) {
   const s = sayStream();
   return {
     append: (p) => s.append(p),
     stop: (p) => s.stop(p),
-    // DM streamer has no task-chunk concept — only the "started" line reads
-    // as texture; a second "complete" call would just be visual noise.
-    task: (label, status = 'in_progress', id = null) =>
-      status === 'in_progress' ? s.append({ markdown_text: `_${label}…_\n` }).then(() => id) : Promise.resolve(id),
+    // DM streamer has no task-chunk concept, so per-tool-call progress can't
+    // be a real in-place task line the way the thread streamer gets one.
+    // It used to fake it by appending a permanent "_label…_" line to the
+    // transcript on every call — with a multi-tool-call turn (e.g. two
+    // search_workspace calls) that reads as the SAME status stuck on screen
+    // forever, not as progress (live-reported: 5 stacked "Searching your
+    // workspace…" lines in one reply). Slack's native ephemeral loading
+    // status (setStatus, already used for the "Weaving…" placeholder) is
+    // the actual dynamic-status primitive — route real per-tool labels
+    // through it instead so they update in place and clear on their own.
+    task: (label, status = 'in_progress', id = null) => {
+      if (status === 'in_progress' && setStatus) setStatus({ status: `${label}…` }).catch(() => {});
+      return Promise.resolve(id);
+    },
   };
 }
 

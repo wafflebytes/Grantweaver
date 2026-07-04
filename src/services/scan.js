@@ -69,12 +69,24 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
     if (i < queries.length - 1) await new Promise((r) => setTimeout(r, 6500));
   }
 
-  let themeRows = await classifyThemes(collected);
+  // Same de-dup rationale as search_workspace (tools.js): identical text can
+  // legitimately live in more than one channel and RTS returns every copy —
+  // without this the evidence index double/triple-counts strength for what
+  // is really one piece of evidence.
+  const seenSnippets = new Set();
+  const deduped = collected.filter((c) => {
+    const key = c.snippet?.trim().toLowerCase();
+    if (key && seenSnippets.has(key)) return false;
+    if (key) seenSnippets.add(key);
+    return true;
+  });
+
+  let themeRows = await classifyThemes(deduped);
   if (!themeRows) {
     // Classifier down (or empty) — degrade to a deterministic heuristic
     // grouping so the scan NEVER fails outright.
     const byKey = new Map();
-    for (const c of collected) {
+    for (const c of deduped) {
       const key = `${c.query_label}::${c.channel_id}`;
       if (!byKey.has(key)) byKey.set(key, { theme: c.query_label, channel_id: c.channel_id, channel_name: c.channel_name, permalinks: [], has_files: false });
       const row = byKey.get(key);
@@ -88,7 +100,7 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
   await db.clearIndex(teamId);
   const byTheme = new Map();
   for (const row of themeRows) {
-    const hits = collected.filter((c) => c.channel_id === row.channel_id).length || row.permalinks.length || 1;
+    const hits = deduped.filter((c) => c.channel_id === row.channel_id).length || row.permalinks.length || 1;
     await db.upsertIndexRow(teamId, {
       theme: row.theme, channel_id: row.channel_id, channel_name: row.channel_name,
       strength: row.strength, hits, permalinks: row.permalinks, has_files: row.has_files,
@@ -100,8 +112,8 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
 
   return {
     themes: [...byTheme.entries()].map(([theme, hits]) => ({ theme, hits })),
-    totalHits: collected.length,
-    channelsCovered: new Set(collected.map((c) => c.channel_id)).size,
-    fileCount: collected.filter((c) => c.is_file).length,
+    totalHits: deduped.length,
+    channelsCovered: new Set(deduped.map((c) => c.channel_id)).size,
+    fileCount: deduped.filter((c) => c.is_file).length,
   };
 }

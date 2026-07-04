@@ -160,11 +160,26 @@ export function buildToolbelt(ctx) {
       // mention otherwise gets its own question (and the bot's last answer)
       // back as top "hits". Note mentions render as <@ID|name>, so match the
       // prefix, not <@ID>. Transient filter, nothing stored.
-      const results = rawResults.filter((r) =>
+      const notSelfTalk = rawResults.filter((r) =>
         r.message_ts !== ctx.messageTs
         && !(ctx.botUserId && (
           r.snippet?.includes(`<@${ctx.botUserId}`)
           || r.author_user_id === ctx.botUserId)));
+      // The same text can legitimately exist verbatim in more than one
+      // channel (an old channel gets renamed/archived and its content
+      // re-posted into a fresh one, a message gets copy-pasted, etc.) — RTS
+      // has no concept of that and will happily return every copy as a
+      // separate "hit". Without this, one real quote can show up as 3-4
+      // duplicate evidence cards for a single query, which reads as broken
+      // even though each hit is individually real. Keep the first (highest-
+      // ranked) copy only.
+      const seenText = new Set();
+      const results = notSelfTalk.filter((r) => {
+        const key = r.snippet?.trim().toLowerCase();
+        if (key && seenText.has(key)) return false;
+        if (key) seenText.add(key);
+        return true;
+      });
       // Cards are always posted when there are hits — the model must not be
       // able to narrate strong evidence in prose only; permalink cards are the
       // demo's "not a wrapper" proof and have to land on screen every time.
