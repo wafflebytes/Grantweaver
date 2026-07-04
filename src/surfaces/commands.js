@@ -110,6 +110,31 @@ export function registerCommands(app) {
       return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|deadline|digest|sync-list>`' });
     }
 
+    // Live feature request: a way to reset the DM for demo takes without
+    // re-provisioning the whole sandbox. Bot tokens can only delete their
+    // OWN messages (Slack API constraint — never another user's), so this
+    // clears every message Grantweaver itself posted in this DM; the
+    // human's own messages are left for them to remove by hand if they want
+    // a truly blank thread.
+    if (sub === 'clear') {
+      const info = await client.conversations.info({ channel: command.channel_id }).catch(() => null);
+      if (!info?.channel?.is_im) {
+        return respond({ response_type: 'ephemeral', text: 'This only clears MY messages, and only works in your DM with me (not a channel). 🧶' });
+      }
+      const { user_id: botUserId } = await client.auth.test();
+      let deleted = 0, cursor;
+      do {
+        const { messages = [], response_metadata } = await client.conversations.history({ channel: command.channel_id, limit: 200, cursor }).catch(() => ({}));
+        for (const m of messages) {
+          if (m.user === botUserId || m.bot_id) {
+            await client.chat.delete({ channel: command.channel_id, ts: m.ts }).then(() => { deleted++; }).catch(() => {});
+          }
+        }
+        cursor = response_metadata?.next_cursor || undefined;
+      } while (cursor);
+      return respond({ response_type: 'ephemeral', text: `🧹 Cleared ${deleted} of my messages from this DM. Your own messages stay — I can only delete what I posted.` });
+    }
+
     // help + anything unknown → same friendly card (never an error dump)
     return respond({ response_type: 'ephemeral',
       text: 'Grantweaver help', blocks: helpBlocks() });
