@@ -19,9 +19,18 @@ async function getClient() {
   return clientPromise;
 }
 
-async function callTool(name, args) {
+// Unlike llm.js's client, this MCP call had no timeout at all — a stalled
+// grantsgov-server (or its network path) left a tool call, and therefore the
+// whole agent turn, hanging indefinitely with an empty stream and no error
+// (live-reproduced: a "pipeline add" turn stuck on fetch_opportunity for
+// minutes with nothing surfaced). Race it against a deadline so the turn's
+// own catch can close the stream out honestly instead of hanging forever.
+async function callTool(name, args, timeoutMs = 30_000) {
   const c = await getClient();
-  const res = await c.callTool({ name, arguments: args });
+  const res = await Promise.race([
+    c.callTool({ name, arguments: args }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`grantsgov MCP call "${name}" timed out after ${timeoutMs}ms`)), timeoutMs)),
+  ]);
   const payload = res?.content?.[0]?.text ?? '{}';
   return JSON.parse(payload);
 }
