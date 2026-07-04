@@ -26,7 +26,14 @@ export function getLlm() {
 export const MODEL = process.env.LLM_MODEL ?? 'gemini-2.5-flash';
 export const MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 4000);
 
-export async function withRetry(fn, attempts = 3) {
+// 3 attempts x 120s timeout meant a truly slow backend could take ~6min to
+// surface an error on ONE completion call — and a tool turn can make two of
+// these (see loop.js's truncation retry) across up to MAX_TURNS turns, so a
+// single Slack reply could legitimately sit for the better part of an hour
+// before failing. Live-observed worst case: ~9.5min on a single turn. 2
+// attempts halves the worst case per call without giving up retries
+// altogether (a 5xx/429 blip still gets one retry).
+export async function withRetry(fn, attempts = 2) {
   let last;
   for (let i = 0; i < attempts; i++) {
     try { return await fn(); }

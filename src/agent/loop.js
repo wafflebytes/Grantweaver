@@ -21,6 +21,15 @@ const TASK_LABELS = {
 const MAX_TURNS = 8;
 const STRENGTH_RANK = { star: 0, solid: 1, weak: 2 };
 
+// A slow LLM backend can legitimately take 30-90s to answer — without this,
+// Slack just shows the loading indicator the whole time and a live user
+// reported it as looking hung. Fires `onSlow` once if `promise` hasn't
+// settled within `ms`; never affects the promise's own result or timing.
+function withHeartbeat(promise, ms, onSlow) {
+  const timer = setTimeout(() => onSlow?.().catch?.(() => {}), ms);
+  return promise.finally(() => clearTimeout(timer));
+}
+
 // TOOL_SCHEMAS stay in our internal {name, description, input_schema} shape;
 // adapt once here to the OpenAI function-tool wire format.
 const OPENAI_TOOLS = TOOL_SCHEMAS.map((t) => ({
@@ -132,13 +141,22 @@ export async function runAgentTurn(ctx) {
     throw e;
   }
 
+  let toldSlow = false;
   async function runTurnLoop() {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    let response = await withRetry(() =>
-      getLlm().chat.completions.create({
-        model: MODEL, max_tokens: MAX_TOKENS, temperature: 0.2,
-        tools: OPENAI_TOOLS, messages,
-      })
+    let response = await withHeartbeat(
+      withRetry(() =>
+        getLlm().chat.completions.create({
+          model: MODEL, max_tokens: MAX_TOKENS, temperature: 0.2,
+          tools: OPENAI_TOOLS, messages,
+        })
+      ),
+      25_000,
+      async () => {
+        if (toldSlow) return;
+        toldSlow = true;
+        await getStreamer().append({ markdown_text: "Still working on this one — the model's taking a bit longer than usual…" });
+      },
     );
 
     // The model's internal reasoning competes with its answer AND its tool
