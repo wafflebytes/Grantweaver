@@ -59,6 +59,24 @@ never safe, and it violates Marketplace policy. The Real-Time Search API
 possible for the first time. Grantweaver is a grant tool that could not have
 been built five months ago.
 
+## Beyond search-and-draft
+
+- **Conversational onboarding.** No settings form. Grantweaver asks about
+  your mission, focus areas, and which channels to read, then runs a live
+  workspace scan and shows you exactly what evidence it found, organized by
+  theme, before you ask it anything. `/grantweaver reset` starts over.
+- **A public evidence index.** Every org gets a magic-link web page
+  (`/org/<token>`) summarizing what its workspace can already prove to a
+  funder, ready to paste straight into a proposal instead of screenshotting a
+  Slack card.
+- **It doesn't wait to be asked.** An opportunity that's gone quiet for a
+  week gets a gentle nudge in-thread. Deadlines get proactive reminders, and
+  weekly digests land wherever the team decided to watch.
+- **A real two-way pipeline.** Add a grant and Grantweaver builds a
+  persistent Canvas, a requirements checklist, and a Slack List row
+  together. Edit the List by hand and the pipeline in Slack catches up
+  within the hour.
+
 ## How it fits together
 
 ```mermaid
@@ -117,7 +135,7 @@ claude mcp add --transport http grantweaver http://localhost:7802/mcp \
   --header "Authorization: Bearer $MCP_SHARED_SECRET"
 ```
 
-Then ask: *"What's due in the next two weeks for team T…?"* — four read-only
+Then ask: *"What's due in the next two weeks for team T…?"* Four read-only
 tools are available: `list_pipeline`, `get_deadlines`, `search_grants`, and
 `get_impact_meter`. Requests without the bearer secret get a 401.
 
