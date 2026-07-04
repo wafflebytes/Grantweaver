@@ -6,6 +6,13 @@ const STAGES = [
   ['submitted', '📮 Submitted'], ['awarded', '🏆 Awarded'], ['declined', '🗂 Declined'],
 ];
 
+// Slack's own recommended way to hand a user off from a Home tab (which
+// cannot itself switch a client to the DM/messages tab) into a real
+// conversation with the app — the same app_redirect link the marketing
+// site's "Open in Slack" button already uses.
+const APP_ID = 'A0BESSN1JP8';
+const ASK_URL = `https://slack.com/app_redirect?app=${APP_ID}`;
+
 export function registerHome(app) {
   app.event('app_home_opened', async ({ event, client, context }) => {
     if (event.tab !== 'home') return;
@@ -23,11 +30,6 @@ export function registerHome(app) {
     await db.moveOpportunity(body.team.id, oppId, stage);
     await publishHome(client, body.team.id, body.user.id);
   });
-
-  app.action('gw:home:index', async ({ ack, body, client }) => {
-    await ack();
-    await client.chat.postMessage({ channel: body.user.id, text: `🧶 Your evidence index: ${orgLinkUrl(body.team.id)}` });
-  });
 }
 
 export async function publishHome(client, teamId, userId) {
@@ -43,11 +45,16 @@ export async function publishHome(client, teamId, userId) {
         accessibility_label: 'Refresh this dashboard' },
       { type: 'button', action_id: 'open_setup', text: { type: 'plain_text', text: '⚙️ Settings' },
         accessibility_label: 'Open organization settings' },
-      { type: 'button', action_id: 'open_assistant_hint', style: 'primary',
+      // Both used to fire a background action (one dead — no handler was
+      // ever registered for open_assistant_hint; the other DM'd a link
+      // instead of opening it) when Slack buttons support `url` directly.
+      // A Home tab can't switch the client to the DM pane itself, so
+      // app_redirect is the real mechanism, not a workaround.
+      { type: 'button', url: ASK_URL, style: 'primary',
         text: { type: 'plain_text', text: '💬 Ask Grantweaver' },
-        accessibility_label: 'How to open the Grantweaver agent panel' },
-      { type: 'button', action_id: 'gw:home:index', text: { type: 'plain_text', text: '📄 Evidence index' },
-        accessibility_label: 'DM me the link to the web evidence index' },
+        accessibility_label: 'Open the Grantweaver agent panel' },
+      { type: 'button', url: orgLinkUrl(teamId), text: { type: 'plain_text', text: '📄 Evidence index' },
+        accessibility_label: 'Open the web evidence index' },
     ]},
     { type: 'section', text: { type: 'mrkdwn',
       text: `*This quarter:* ${meter.surfaced} opportunities surfaced · $${meter.applied.toLocaleString()} applied for · ${meter.evidence} evidence items woven · est. *${meter.hoursSaved} hrs saved*` } },

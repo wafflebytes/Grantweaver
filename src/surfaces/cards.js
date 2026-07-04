@@ -4,12 +4,12 @@
 // same append-only discipline as blocks.js (which stays frozen for legacy
 // Phase-1 renders).
 
-function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
+export function money(n) { return n ? `$${Number(n).toLocaleString()}` : '—'; }
 // DB rows carry close_date as a JS Date object (pg's DATE type); fresh
 // grants.gov search results carry it as a plain "MM/DD/YYYY" string.
 // Interpolating a Date directly renders its ugly toString() ("Sat May 24
 // 2029 18:30:00 GMT+0000 (...)") in a card — normalize display everywhere.
-function fmtDate(v) {
+export function fmtDate(v) {
   if (!v) return null;
   // pg DATE columns come back as local-midnight Dates — toISOString() shows
   // the previous day in any UTC+ timezone; use local components instead.

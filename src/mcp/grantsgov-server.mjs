@@ -27,6 +27,25 @@ async function post(path, body) {
 
 function text(obj) { return { content: [{ type: 'text', text: JSON.stringify(obj) }] }; }
 
+// Grants.gov titles/synopses come back with raw HTML tags and entities
+// still embedded (live-observed: "...Bureau wide&nbsp;&nbsp;&nbsp;&nbsp;"
+// rendering literally in Slack cards) — strip tags, decode the handful of
+// entities that actually show up in this feed, and collapse whitespace.
+function cleanText(v) {
+  if (v == null) return v;
+  return String(v)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#8203;/g, '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Grants.gov returns award amounts as numbers, numeric strings, or the
 // literal string "none" — normalize to number | null so consumers never
 // see "$NaN" or feed "none" into a NUMERIC column.
@@ -60,8 +79,8 @@ export function buildServer() {
       const hits = (data?.data?.oppHits ?? []).map((h) => ({
         opp_id: String(h.id),
         opp_number: h.number,
-        title: h.title,
-        agency: h.agencyName ?? h.agency,
+        title: cleanText(h.title),
+        agency: cleanText(h.agencyName ?? h.agency),
         close_date: h.closeDate ?? null,
         open_date: h.openDate ?? null,
         status: h.oppStatus,
@@ -82,13 +101,14 @@ export function buildServer() {
       return text({
         opp_id,
         opp_number: s.opportunityNumber,
-        title: s.opportunityTitle,
-        agency: syn.agencyName,
-        synopsis: String(syn.synopsisDesc ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000),
+        title: cleanText(s.opportunityTitle),
+        agency: cleanText(syn.agencyName),
+        url: `https://grants.gov/search-results-detail/${opp_id}`,
+        synopsis: cleanText(syn.synopsisDesc).slice(0, 4000),
         award_ceiling: money(syn.awardCeiling),
         award_floor: money(syn.awardFloor),
         close_date: syn.responseDate,
-        eligibility: String(syn.applicantEligibilityDesc ?? '').slice(0, 1500),
+        eligibility: cleanText(syn.applicantEligibilityDesc).slice(0, 1500),
         contact: syn.agencyContactEmail,
         // Live-verified field names: applicantTypes lives on
         // `synopsis`, not the top-level record; attachment folders are

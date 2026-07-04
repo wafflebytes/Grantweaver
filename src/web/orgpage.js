@@ -37,21 +37,29 @@ function expiredPage() {
 const STYLE = `<style>
 :root{--green:#1B4332;--green-deep:#143528;--green-soft:#2D6A4F;--gold:#D4A017;--gold-soft:#E8C25A;--gold-pale:#F6E8C2;
 --cream:#FAF7F0;--paper:#FFFFFF;--ink:#1f2a24;--muted:#5c6b62;--radius:18px;
+--on-green:#FAF7F0;
 --shadow:0 1px 3px rgba(27,67,50,.06),0 8px 24px -12px rgba(27,67,50,.14);
 --display:'SF Pro Rounded',ui-rounded,-apple-system,'Segoe UI',Roboto,sans-serif;--body:-apple-system,'Segoe UI',Roboto,sans-serif}
 @media (prefers-color-scheme:dark){:root{--cream:#121a15;--paper:#182019;--ink:#eef2ef;--muted:#9db0a6;
 --shadow:0 1px 3px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5)}}
+/* --cream doubles as the page background AND (via --on-green) the header's
+   text color on its dark green gradient — dark mode redefines --cream to a
+   near-black page background, which was ALSO darkening the header text to
+   match, making the evidence-page header numbers nearly unreadable
+   (live-reported: poor contrast on "surfaced / applied for / evidence
+   items / hrs saved"). --on-green stays a fixed light color regardless of
+   theme since the header's background never changes with theme either. */
 *{box-sizing:border-box;margin:0}
 body{font-family:var(--body);color:var(--ink);background:var(--cream);line-height:1.6;padding:0 0 48px}
 .wrap{max-width:760px;margin:0 auto;padding:0 20px}
 h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;color:var(--green)}
 @media (prefers-color-scheme:dark){h1,h2,h3{color:var(--gold-soft)}}
-header.top{background:radial-gradient(120% 140% at 50% -20%,var(--green-soft) 0%,var(--green) 45%,var(--green-deep) 100%);color:var(--cream);padding:36px 0}
-header.top h1{color:var(--cream);font-size:1.6rem;margin-bottom:4px}
-header.top .meta{opacity:.85;font-size:.9rem}
+header.top{background:radial-gradient(120% 140% at 50% -20%,var(--green-soft) 0%,var(--green) 45%,var(--green-deep) 100%);color:var(--on-green);padding:36px 0}
+header.top h1{color:var(--on-green);font-size:1.6rem;margin-bottom:4px}
+header.top .meta{color:var(--on-green);opacity:.85;font-size:.9rem}
 .meter{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:18px}
-.meter div{background:rgba(255,255,255,.08);border-radius:12px;padding:10px 14px}
-.meter b{display:block;font-family:var(--display);font-size:1.3rem}
+.meter div{background:rgba(255,255,255,.14);border-radius:12px;padding:10px 14px;color:var(--on-green)}
+.meter b{display:block;font-family:var(--display);font-size:1.3rem;color:var(--on-green)}
 .card{background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;margin-top:24px}
 .chip{display:inline-block;font-size:.78rem;background:rgba(212,160,23,.14);color:var(--gold);border-radius:999px;padding:3px 10px;margin:2px 4px 2px 0}
 .theme-row{padding:14px 0;border-bottom:1px solid rgba(27,67,50,.08)}

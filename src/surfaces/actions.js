@@ -4,7 +4,7 @@ import { syncOpportunityToList } from '../services/lists.js';
 import { runIntent, markCardRunning, markCardCancelled } from '../agent/intents.js';
 import { addOpportunityFull } from '../agent/tools.js';
 import { refreshOverviewAndRequirements } from '../services/canvas.js';
-import { confirmCard, shareCard } from './cards.js';
+import { confirmCard, shareCard, money, fmtDate } from './cards.js';
 import '../services/exportpack.js'; // side effect: registers the export_pack/answers intent executors
 import { openRevisionThread } from '../agent/revise.js'; // also registers the 'revise' intent executor as a side effect
 
@@ -13,6 +13,28 @@ import { openRevisionThread } from '../agent/revise.js'; // also registers the '
 // thread." Applies to legacy handlers too.
 const replyTarget = (body) => body.message?.thread_ts ?? body.message?.ts;
 const val = (action) => JSON.parse(action.value || '{}');
+
+// Live-reported UX gap: clicking Add-to-pipeline/Watch gave feedback only
+// as a NEW message in the thread, leaving the clicked button sitting there
+// looking un-acted-on. Edit the original card in place instead — the
+// button that was clicked relabels itself (e.g. "✅ Added") and stops being
+// primary-styled, so the card itself carries the state instead of the user
+// having to scroll down for confirmation. Only works on messages the bot
+// itself posted (chat.update requires the posting identity); silently
+// no-ops otherwise rather than erroring the whole action.
+async function markButtonDone(client, body, actionId, newLabel) {
+  if (!body.message?.blocks) return;
+  const blocks = body.message.blocks.map((b) => {
+    if (b.type !== 'actions') return b;
+    return {
+      ...b,
+      elements: b.elements.map((el) => (el.action_id === actionId
+        ? { ...el, text: { ...el.text, text: newLabel }, style: undefined }
+        : el)),
+    };
+  });
+  await client.chat.update({ channel: body.channel.id, ts: body.message.ts, blocks, text: body.message.text }).catch(() => {});
+}
 const NOT_RELEVANT_REASONS = ['Wrong focus area', 'Award too large for us', 'Award too small', "We're not eligible", 'Other (tell me)'];
 
 async function canvasLink(client, canvasId) {
@@ -146,6 +168,7 @@ export function registerActions(app) {
         url: `https://grants.gov/search-results-detail/${o}`, added_by: body.user.id,
         channelId: body.channel.id,
       });
+      await markButtonDone(client, body, 'gw:grant:add', '✅ Added');
       await client.chat.postMessage({
         channel: body.channel.id, thread_ts,
         text: `➕ Added *${d.title}* to your pipeline (Reviewing) — canvas created, checklist + fit filling in. See it on my Home tab.`,
@@ -160,12 +183,28 @@ export function registerActions(app) {
   app.action('gw:grant:details', async ({ ack, action, body, client }) => {
     await ack();
     const { o } = val(action);
-    const d = await grantsGov.fetchOpportunity(o);
+    const channel = body.channel.id, thread_ts = replyTarget(body);
+    // Live-reported bug: this had NO error handling — a Grants.gov hiccup
+    // threw after ack() and the user just saw nothing happen, which reads
+    // as "sometimes unreliable, only shows half the info" when it's really
+    // an unhandled failure some of the time. Also missing the actual
+    // Grants.gov link and truncating synopsis/eligibility far below
+    // Slack's 3000-char section limit for no reason.
+    let d;
+    try { d = await grantsGov.fetchOpportunity(o); }
+    catch (e) {
+      console.error('[gw:grant:details]', e?.message ?? e);
+      await client.chat.postMessage({ channel, thread_ts,
+        text: "Couldn't pull full details just now (Grants.gov hiccup) — try again in a minute. 🧶" });
+      return;
+    }
     await client.chat.postMessage({
-      channel: body.channel.id, thread_ts: replyTarget(body),
+      channel, thread_ts,
       text: `Details: ${d.title}`,
       blocks: [{ type: 'section', text: { type: 'mrkdwn',
-        text: `*${d.title}*\n*Agency:* ${d.agency ?? '—'} · *Ceiling:* $${Number(d.award_ceiling ?? 0).toLocaleString()} · *Closes:* ${d.close_date ?? '—'}\n\n*Eligibility:* ${(d.eligibility ?? '—').slice(0, 500)}\n\n${(d.synopsis ?? '').slice(0, 900)}` } }],
+        text: `*${d.title}*\n*Agency:* ${d.agency ?? '—'} · *Ceiling:* ${money(d.award_ceiling)} · *Closes:* ${fmtDate(d.close_date) ?? '—'}\n\n*Eligibility:* ${(d.eligibility || '—').slice(0, 1200)}\n\n${(d.synopsis || 'No synopsis provided.').slice(0, 2200)}` } },
+        ...(d.url ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `<${d.url}|View on Grants.gov>` }] }] : []),
+      ],
     });
   });
 
@@ -200,6 +239,7 @@ export function registerActions(app) {
     await ack();
     const { o } = val(action);
     await db.addWatch(body.team.id, { kind: 'opp', params: { opp_id: o }, created_by: body.user.id });
+    await markButtonDone(client, body, 'gw:grant:watch', '🔮 Watching');
     await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
       text: "🔮 Watching this one — I'll flag it if it opens or new similar matches appear." });
   });
@@ -604,11 +644,19 @@ export function registerActions(app) {
     pendingShare.delete(key);
     if (!pending) return;
     const teamId = body.team.id;
-    const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(pending.o));
+    let opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(pending.o));
+    // Live-reported bug: when the DB lookup missed, this fell back to the
+    // bare opp_id as the "title" — a shared card that reads as just a
+    // string of numbers. Fall back to a live Grants.gov fetch instead of
+    // giving up on the title.
+    if (!opp?.title) {
+      const d = await grantsGov.fetchOpportunity(pending.o).catch(() => null);
+      opp = { title: d?.title ?? `Opportunity #${pending.o}`, agency: d?.agency, url: d?.url };
+    }
     const target = action.selected_conversation;
     await client.chat.postMessage({
-      channel: target, text: `Shared: ${opp?.title ?? pending.o}`,
-      blocks: shareCard({ title: opp?.title ?? pending.o, agency: opp?.agency, canvasUrl: opp?.canvas_id ? await canvasLink(client, opp.canvas_id) : opp?.url, sharedBy: body.user.id }),
+      channel: target, text: `Shared: ${opp.title}`,
+      blocks: shareCard({ title: opp.title, agency: opp.agency, canvasUrl: opp.canvas_id ? await canvasLink(client, opp.canvas_id) : (opp.url ?? `https://grants.gov/search-results-detail/${pending.o}`), sharedBy: body.user.id }),
     }).catch((e) => console.warn('[gw:pipe:share]', e?.data?.error ?? e.message));
     await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: pending.thread_ts, text: `Shared to <#${target}>. 🧶` });
   });

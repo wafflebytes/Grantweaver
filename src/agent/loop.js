@@ -15,6 +15,7 @@ const TASK_LABELS = {
   pipeline: 'Updating your pipeline',
   create_draft_canvas: 'Writing the draft',
   watch: 'Setting up the watch',
+  rescan_workspace: 'Rebuilding your evidence index',
 };
 
 const MAX_TURNS = 8;

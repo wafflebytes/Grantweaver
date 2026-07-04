@@ -6,6 +6,7 @@ import { ensureOppCanvas, refreshOverviewAndRequirements } from '../services/can
 import { grantCardV2, forecastCard, evidenceCardV2, confirmCard } from '../surfaces/cards.js';
 import { stashDraftMarkdown } from './intents.js';
 import { assessFitBatch, extractChecklist } from '../prompts/classifiers.js';
+import { runWorkspaceScan } from '../services/scan.js';
 
 // Un-added search results don't have a DB row to cache fit on — a short
 // in-process TTL map (same spirit as the grantsgov client's own cache) avoids
@@ -136,6 +137,11 @@ export const TOOL_SCHEMAS = [
     name: 'request_changes',
     description: "Open (or point to) the revision thread for an opportunity's existing draft so the team can request changes. Use whenever the user wants edits to a draft that already exists. Returns the thread location; changes are applied after the team confirms scope there.",
     input_schema: { type: 'object', properties: { opp_id: { type: 'string' } }, required: ['opp_id'] },
+  },
+  {
+    name: 'rescan_workspace',
+    description: "Rebuild the organization's evidence index by re-scanning its watched channels right now. Previously only reachable from the onboarding review card's 'Adjust' button — use this whenever the user asks to rebuild, refresh, or rescan the evidence index, or says the index looks stale/empty.",
+    input_schema: { type: 'object', properties: {}, required: [] },
   },
 ];
 
@@ -291,6 +297,17 @@ export function buildToolbelt(ctx) {
       const { openRevisionThread } = await import('./revise.js');
       await openRevisionThread(client, { teamId, channel: channelId, thread_ts: threadTs, opp });
       return { ok: true, note: 'Revision thread opened in this conversation — tell the user to describe what should change there.' };
+    },
+
+    async rescan_workspace() {
+      if (!teamId) return { error: 'No team context' };
+      const noopStreamer = { task: async () => {} };
+      const summary = await runWorkspaceScan(client, teamId, noopStreamer, { actionToken }).catch((e) => {
+        console.error('[rescan_workspace]', e?.message ?? e);
+        return null;
+      });
+      if (!summary) return { error: 'Rescan failed — Real-Time Search may be unavailable right now.' };
+      return { ok: true, ...summary, note: `Evidence index rebuilt: ${summary.totalHits} hit(s) across ${summary.channelsCovered} channel(s). Tell the user, and mention the /org web page shows the full breakdown.` };
     },
 
     async evidence_locker({ action, channel_id, message_ts, permalink, tag = 'story' }) {
