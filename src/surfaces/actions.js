@@ -142,12 +142,16 @@ export function registerActions(app) {
     await ack();
     try {
       const details = await grantsGov.fetchOpportunity(action.value);
-      await db.addOpportunity(body.team.id, {
+      // Was calling db.addOpportunity directly — bypassed canvas creation,
+      // checklist/fit scoring, AND the List sync entirely (a live-reported
+      // sync-audit gap: this legacy button, still live on old cards, left
+      // an opportunity with none of the setup every other add path gives).
+      await addOpportunityFull(client, body.team.id, {
         opp_id: action.value, opp_number: details.opp_number, title: details.title,
         agency: details.agency, close_date: details.close_date,
         award_ceiling: details.award_ceiling,
         url: `https://grants.gov/search-results-detail/${action.value}`,
-        added_by: body.user.id,
+        added_by: body.user.id, channelId: body.channel.id,
       });
       await client.chat.postEphemeral({
         channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),

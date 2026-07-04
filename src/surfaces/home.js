@@ -1,6 +1,6 @@
 import { db } from '../services/db.js';
 import { orgLinkUrl } from '../services/weblink.js';
-import { listLink } from '../services/lists.js';
+import { listLink, syncOpportunityToList } from '../services/lists.js';
 
 const STAGES = [
   ['suggested', '🌱 Suggested'], ['reviewing', '🔍 Reviewing'], ['drafting', '✍️ Drafting'],
@@ -28,8 +28,14 @@ export function registerHome(app) {
   app.action(/^stage_move:/, async ({ ack, body, action, client }) => {
     await ack();
     const [oppId, stage] = action.selected_option.value.split('|');
-    await db.moveOpportunity(body.team.id, oppId, stage);
-    await publishHome(client, body.team.id, body.user.id);
+    const teamId = body.team.id;
+    await db.moveOpportunity(teamId, oppId, stage);
+    // Live gap found in review: this was the one stage-move surface that
+    // never synced the List row — every other path (chat, modal, buttons)
+    // already did.
+    const moved = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(oppId));
+    if (moved) syncOpportunityToList(client, teamId, moved).catch(() => {});
+    await publishHome(client, teamId, body.user.id);
   });
 }
 
