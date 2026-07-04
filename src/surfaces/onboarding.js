@@ -5,9 +5,6 @@
 // classifier (src/prompts/classifiers.js#classifyThemes).
 import { db } from '../services/db.js';
 import { publishHome } from './home.js';
-import { runWorkspaceScan } from '../services/scan.js';
-import { scanSummaryCard, confirmCard } from './cards.js';
-import { orgLinkUrl } from '../services/weblink.js';
 import { registerIntentExecutor } from '../agent/intents.js';
 
 const FOCUS = ['education', 'youth', 'health', 'environment', 'arts', 'housing',
@@ -97,51 +94,21 @@ async function postChannels(client, channel) {
   });
 }
 
-function makeScanStreamer(client, channel) {
-  let ts = null;
-  const lines = [];
-  return {
-    async task(label) {
-      lines.push(`🧶 ${label}…`);
-      const text = lines.join('\n');
-      if (!ts) {
-        const posted = await client.chat.postMessage({ channel, text });
-        ts = posted.ts;
-      } else {
-        await client.chat.update({ channel, ts, text }).catch(() => {});
-      }
-    },
-  };
-}
-
-async function runScanAndReview(client, teamId, channel) {
-  await setStep(teamId, 'scanning');
-  await client.chat.postMessage({ channel, text: COPY.scanning });
-  const streamer = makeScanStreamer(client, channel);
-  const summary = await runWorkspaceScan(client, teamId, streamer).catch((e) => {
-    console.error('[onboarding:scan]', e?.message ?? e);
-    return { themes: [], totalHits: 0, channelsCovered: 0, fileCount: 0 };
-  });
-  await setStep(teamId, 'review');
-  const index = await db.listIndex(teamId);
+// Live-caught, platform-level constraint: Slack's assistant.search.context
+// requires a real per-message action_token, which ONLY exists on live
+// `message` events — never on a button click or a view_submission. Every
+// prior call site here (modal save, "done picking channels", the Adjust
+// button) tried to run the scan synchronously from exactly those
+// token-less contexts and failed 100% of the time with invalid_action_token,
+// even though the SAME scan (via rescan_workspace, invoked from a real
+// typed message) works fine elsewhere. So: never call runWorkspaceScan from
+// here. Hand off to a real message instead — the user's next message
+// carries a genuine token, and the model will call rescan_workspace itself.
+async function promptForScan(client, channel) {
   await client.chat.postMessage({
-    channel, text: COPY.review,
-    blocks: scanSummaryCard({ index, webUrl: orgLinkUrl(teamId) }),
+    channel,
+    text: "You're set! 🧶 One more step — reply here with anything (try \"scan my workspace\") and I'll run your first evidence scan and show you what's already provable.",
   });
-  // The scan used to just post the summary and stop — thin coverage got no
-  // reaction at all, even though that's exactly the moment a real
-  // development director would ask a follow-up question. One honest,
-  // specific nudge (not a generic "add more channels") when coverage is
-  // genuinely thin, so the org can fix it before it bites them in a draft.
-  if (summary.totalHits < 3 || summary.channelsCovered < 2) {
-    await client.chat.postMessage({
-      channel,
-      text: "I didn't find much yet — want to point me at more channels?",
-      blocks: [{ type: 'section', text: { type: 'mrkdwn',
-        text: `That's pretty thin evidence to build funder-ready proof from (${summary.totalHits} hit${summary.totalHits === 1 ? '' : 's'} across ${summary.channelsCovered} channel${summary.channelsCovered === 1 ? '' : 's'}). Two common reasons: your team posts outcomes somewhere I'm not watching yet, or the numbers mostly live in files/spreadsheets I haven't been shared. Hit *Adjust* above to add channels, or just tell me here where your team tracks program metrics or stories.` } }],
-    });
-  }
-  return summary;
 }
 
 export function registerOnboarding(app) {
@@ -185,15 +152,7 @@ export function registerOnboarding(app) {
       digest_channel: v.digest.val.selected_conversation ?? null,
       memories_channel: v.memories.val.selected_conversation ?? null,
     });
-    // Live-caught bug: this modal path (reachable via /grantweaver setup —
-    // the more discoverable entry point) used to just say "You're set!" and
-    // skip the scan entirely, while the DM welcome-message flow bundled it.
-    // Two setup paths giving two different outcomes is worse than either
-    // alone — both must end at the same evidence-index review.
-    await runScanAndReview(client, teamId, body.user.id);
-    await client.chat.postMessage({
-      channel: body.user.id, text: COPY.done,
-    });
+    await promptForScan(client, body.user.id);
     await publishHome(client, teamId, body.user.id);
   });
 
@@ -251,35 +210,8 @@ export function registerOnboarding(app) {
     const a = org?.onboarding_state?.answers ?? {};
     await db.setChannels(teamId, { watched: a.watched ?? [], post: a.post ?? [] });
 
-    if (org?.onboarding_state?.isRescan) {
-      // Post-onboarding rescan is a confirm-first intent — it costs ~1min of RTS budget.
-      const intent = await db.createIntent(teamId, { kind: 'rescan', params: {}, requested_by: body.user.id, channel_id: channel });
-      const posted = await client.chat.postMessage({
-        channel, text: 'Ready to rescan',
-        blocks: confirmCard(intent, { summary: 'Re-read your (updated) channel selection for fresh evidence.', etaSeconds: 60 }),
-      });
-      await db.setIntentMessage(intent.id, posted.ts);
-      await setStep(teamId, 'review');
-      return;
-    }
-    await runScanAndReview(client, teamId, channel);
-  });
-
-  // ── review ──
-  app.action('gw:scan:ok', async ({ ack, body, client }) => {
-    await ack();
-    const teamId = body.team.id, channel = body.channel.id;
     await db.setOnboardingState(teamId, null);
-    await client.chat.postMessage({ channel, text: COPY.done });
-    await publishHome(client, teamId, body.user.id);
-  });
-  app.action('gw:scan:adjust', async ({ ack, body, client }) => {
-    await ack();
-    const teamId = body.team.id, channel = body.channel.id;
-    await setStep(teamId, 'channels', {});
-    const org = await db.getOrg(teamId);
-    await db.setOnboardingState(teamId, { ...org.onboarding_state, step: 'channels', isRescan: true });
-    await postChannels(client, channel);
+    await promptForScan(client, channel);
   });
 
   // ── reset ──
@@ -301,10 +233,12 @@ export function registerOnboarding(app) {
     await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, text: 'Kept everything as-is. 🧶' });
   });
 
-  // rescan intent executor — reused by the review "Adjust" path and any
-  // future organic "rescan my workspace" ask.
+  // Confirm-card intents (✅ reaction / button click) have the exact same
+  // token problem as every other non-message trigger above — a reaction
+  // carries no action_token either. Hand off to promptForScan rather than
+  // guarantee another invalid_action_token failure.
   registerIntentExecutor('rescan', async (client, intent) => {
-    await runScanAndReview(client, intent.team_id, intent.channel_id);
+    await promptForScan(client, intent.channel_id);
   });
 }
 
