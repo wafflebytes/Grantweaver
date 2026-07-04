@@ -4,6 +4,7 @@ import { db } from '../services/db.js';
 import { syncOpportunityToList } from '../services/lists.js';
 import { ensureOppCanvas, refreshOverviewAndRequirements } from '../services/canvas.js';
 import { grantCardV2, forecastCard, evidenceCardV2, confirmCard, pipelineCard } from '../surfaces/cards.js';
+import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 import { stashDraftMarkdown } from './intents.js';
 import { assessFitBatch, extractChecklist } from '../prompts/classifiers.js';
 import { runWorkspaceScan } from '../services/scan.js';
@@ -278,7 +279,7 @@ export function buildToolbelt(ctx) {
           if (moved) syncOpportunityToList(client, teamId, moved).catch(() => {});
         }
         const saved = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(opp.opp_id)) ?? added;
-        if (saved) await say({ text: saved.title, blocks: pipelineCard(saved) }).catch(() => {});
+        if (saved) await say({ text: saved.title, blocks: [...pipelineCard(saved), ...buildFeedbackBlocks()] }).catch(() => {});
         if (targetStage === 'drafting') await fireDraftConfirm(opp.opp_id, saved?.title ?? opp.title);
         return { ok: true, added: opp.title, stage: targetStage };
       }

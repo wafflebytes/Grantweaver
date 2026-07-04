@@ -5,6 +5,7 @@ import { runIntent, markCardRunning, markCardCancelled } from '../agent/intents.
 import { addOpportunityFull } from '../agent/tools.js';
 import { refreshOverviewAndRequirements } from '../services/canvas.js';
 import { confirmCard, shareCard, money, fmtDate } from './cards.js';
+import { buildFeedbackBlocks } from './blocks.js';
 import '../services/exportpack.js'; // side effect: registers the export_pack/answers intent executors
 import { openRevisionThread } from '../agent/revise.js'; // also registers the 'revise' intent executor as a side effect
 
@@ -351,7 +352,10 @@ export function registerActions(app) {
     await db.logActivity(teamId, o, { actor: body.user.id, kind: 'stage_move', summary: `Stage → ${stage} (moved by <@${body.user.id}>)` });
     const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     if (opp) syncOpportunityToList(client, teamId, opp).catch(() => {});
-    await client.chat.postMessage({ channel, thread_ts, text: `Moved *${opp?.title ?? o}* → _${stage}_.` });
+    await client.chat.postMessage({
+      channel, thread_ts, text: `Moved *${opp?.title ?? o}* → _${stage}_.`,
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `Moved *${opp?.title ?? o}* → _${stage}_.` } }, ...buildFeedbackBlocks()],
+    });
     // Same auto-draft as the add-to-pipeline modal — moving INTO drafting
     // (not already there) fires the draft confirm card right away.
     if (stage === 'drafting' && before?.stage !== 'drafting') {
@@ -541,7 +545,10 @@ export function registerActions(app) {
       await syncOpportunityToList(app.client, teamId, moved).catch(() => {});
       await refreshOverviewAndRequirements(app.client, teamId, moved).catch(() => {});
     }
-    await app.client.chat.postMessage({ channel, thread_ts, text: `🎉 Marked *${opp?.title ?? o}* as submitted. Nice work.` });
+    await app.client.chat.postMessage({
+      channel, thread_ts, text: `🎉 Marked *${opp?.title ?? o}* as submitted. Nice work.`,
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `🎉 Marked *${opp?.title ?? o}* as submitted. Nice work.` } }, ...buildFeedbackBlocks()],
+    });
   }
 
   app.action('gw:draft:ready', async ({ ack, action, body }) => {
