@@ -12,6 +12,7 @@
     "mcp:grantweaver": "node --env-file=.env src/mcp/grantweaver-server.mjs",
     "migrate": "node --env-file=.env scripts/migrate.mjs",
     "seed": "node --env-file=.env scripts/seed-demo.mjs",
+    "seed:riverbend": "node --env-file=.env scripts/seed-riverbend.mjs",
     "try:grants": "node scripts/try-grants.mjs",
     "llm:bakeoff": "node --env-file=.env scripts/llm-bakeoff.mjs",
     "smoke": "node --env-file=.env scripts/smoke.mjs",
