@@ -90,12 +90,11 @@ header.top .meta{color:var(--on-green);opacity:.85;font-size:.9rem}
 @media (prefers-color-scheme:dark){.hits-badge{color:var(--gold-soft)}}
 .card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
 .card-head h2{margin:0}
-.card-link{color:var(--gold);background:transparent;font-size:1.3rem;line-height:1;text-decoration:none;
-  width:44px;height:44px;border:2px solid var(--gold);border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
-  font-family:var(--display);transition:background .15s ease;flex-shrink:0}
-.card-link:hover{background:rgba(212,160,23,.1)}
-@media (prefers-color-scheme:dark){.card-link{color:var(--gold-soft);border-color:var(--gold-soft)}
-  .card-link:hover{background:rgba(232,194,90,.1)}}
+.card-link{color:var(--gold);background:transparent;font-size:1.8rem;line-height:1;text-decoration:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--display);transition:opacity .15s ease;flex-shrink:0}
+.card-link:hover{opacity:.7}
+@media (prefers-color-scheme:dark){.card-link{color:var(--gold-soft)}}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
 .stat-grid div{background:rgba(27,67,50,.05);border-radius:12px;padding:10px 14px}
 @media (prefers-color-scheme:dark){.stat-grid div{background:rgba(255,255,255,.04)}}
