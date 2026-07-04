@@ -183,20 +183,27 @@ export function registerOnboarding(app) {
   app.view('org_setup', async ({ ack, body, view, client }) => {
     await ack();
     const v = view.state.values;
-    await db.upsertOrg(body.team.id, {
+    const teamId = body.team.id;
+    await db.upsertOrg(teamId, {
       org_name: v.org_name.val.value,
       mission: v.mission.val.value,
       focus_areas: (v.focus.val.selected_options ?? []).map((o) => o.value),
       state: v.state.val.selected_option?.value,
       org_size: v.size.val.selected_option?.value,
+      watched_channels: v.watched.val.selected_conversations ?? [],
       digest_channel: v.digest.val.selected_conversation ?? null,
       memories_channel: v.memories.val.selected_conversation ?? null,
     });
+    // Live-caught bug: this modal path (reachable via /grantweaver setup —
+    // the more discoverable entry point) used to just say "You're set!" and
+    // skip the scan entirely, while the DM welcome-message flow bundled it.
+    // Two setup paths giving two different outcomes is worse than either
+    // alone — both must end at the same evidence-index review.
+    await runScanAndReview(client, teamId, body.user.id);
     await client.chat.postMessage({
-      channel: body.user.id,
-      text: "You're set! 🧶 I'll match grants to your mission. Open my agent panel (✨ icon) and try “Find matching grants” — or wait for Monday's digest.",
+      channel: body.user.id, text: COPY.done,
     });
-    await publishHome(client, body.team.id, body.user.id);
+    await publishHome(client, teamId, body.user.id);
   });
 
   // ── focus ──
@@ -362,6 +369,9 @@ export function setupModal(org) {
       input('size', 'Team size',
         { type: 'static_select',
           options: ['1-5', '6-25', '26-100', '100+'].map((s) => ({ text: { type: 'plain_text', text: s }, value: s })) }),
+      input('watched', 'Channels to learn from (I search these live for evidence — links only, never message text)',
+        { type: 'multi_conversations_select', filter: { include: ['public', 'private'] },
+          ...(org?.watched_channels?.length ? { initial_conversations: org.watched_channels } : {}) }),
       input('digest', 'Channel for the weekly grant digest',
         { type: 'conversations_select', default_to_current_conversation: true,
           filter: { include: ['public'] } }, true),
