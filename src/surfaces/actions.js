@@ -327,6 +327,31 @@ export function registerActions(app) {
   app.action('gw:draft:open', async ({ ack }) => { await ack(); });
   app.action('gw:share:open', async ({ ack }) => { await ack(); });
 
+  app.action('gw:run:retry', async ({ ack, action, body, client }) => {
+    await ack();
+    const { run_id } = val(action);
+    await client.chat.postMessage({
+      channel: body.channel.id,
+      thread_ts: replyTarget(body),
+      text: `Retry requested for run #${run_id}. Ask me again in this thread and I’ll continue from saved state, re-reading Slack content live before citing.`,
+    }).catch(() => {});
+    await db.logAuditEvent({ teamId: body.team.id, userId: body.user.id, eventType: 'run_retry_requested', subjectType: 'agent_run', subjectId: String(run_id), metadata: {} }).catch(() => {});
+  });
+
+  app.action('gw:run:dismiss', async ({ ack, action, body }) => {
+    await ack();
+    const { run_id } = val(action);
+    await db.logAuditEvent({ teamId: body.team.id, userId: body.user.id, eventType: 'run_dismissed', subjectType: 'agent_run', subjectId: String(run_id), metadata: {} }).catch(() => {});
+  });
+
+  app.action('gw:run:cancel', async ({ ack, action, body, client }) => {
+    await ack();
+    const { run_id } = val(action);
+    await db.requestRunCancel(run_id);
+    await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+      text: `Cancellation requested for run #${run_id}.` }).catch(() => {});
+  });
+
   app.view('gw_not_relevant_submit', async ({ ack, body, view, client }) => {
     await ack();
     const { o, channel, thread_ts } = JSON.parse(view.private_metadata || '{}');
@@ -357,12 +382,16 @@ export function registerActions(app) {
     const teamId = body.team.id, channel = body.channel.id, thread_ts = replyTarget(body);
     const before = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     await db.moveOpportunity(teamId, o, stage);
-    await db.logActivity(teamId, o, { actor: body.user.id, kind: 'stage_move', summary: `Stage → ${stage} (moved by <@${body.user.id}>)` });
+    await db.logActivity(teamId, o, { actor: body.user.id, kind: 'stage_move', summary: `Stage → ${stage} (moved by <@${body.user.id}>)`, metadata: { previous_stage: before?.stage, new_stage: stage } });
     const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
     if (opp) syncOpportunityToList(client, teamId, opp).catch(() => {});
     await client.chat.postMessage({
       channel, thread_ts, text: `Moved *${opp?.title ?? o}* → _${stage}_.`,
-      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `Moved *${opp?.title ?? o}* → _${stage}_.` } }, ...buildFeedbackBlocks()],
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `Moved *${opp?.title ?? o}* → _${stage}_.` } },
+        ...(before?.stage ? [{ type: 'actions', elements: [{ type: 'button', action_id: 'gw:pipe:stage:undo', value: JSON.stringify({ o, stage: before.stage }), text: { type: 'plain_text', text: 'Undo stage move' } }] }] : []),
+        ...buildFeedbackBlocks(),
+      ],
     });
     // Same auto-draft as the add-to-pipeline modal — moving INTO drafting
     // (not already there) fires the draft confirm card right away.
@@ -374,6 +403,18 @@ export function registerActions(app) {
       });
       await db.setIntentMessage(intent.id, posted.ts);
     }
+  });
+
+  app.action('gw:pipe:stage:undo', async ({ ack, action, body, client }) => {
+    await ack();
+    const { o, stage } = val(action);
+    const teamId = body.team.id;
+    await db.moveOpportunity(teamId, o, stage);
+    await db.logActivity(teamId, o, { actor: body.user.id, kind: 'stage_move', summary: `Undo stage move → ${stage}`, metadata: { undo: true, restored_stage: stage } });
+    const opp = (await db.listOpportunities(teamId)).find((x) => x.opp_id === String(o));
+    if (opp) syncOpportunityToList(client, teamId, opp).catch(() => {});
+    await client.chat.postEphemeral({ channel: body.channel.id, user: body.user.id, thread_ts: replyTarget(body),
+      text: `Restored *${opp?.title ?? o}* to _${stage}_.` });
   });
 
   async function askOwnerPick(client, { o, channel, user, thread_ts }) {

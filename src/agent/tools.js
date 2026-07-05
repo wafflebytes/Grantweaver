@@ -189,10 +189,20 @@ export function buildToolbelt(ctx) {
       // applies to messages; unscoped orgs (no watched_channels set yet,
       // e.g. pre-onboarding) fall back to unscoped, matching prior behavior.
       const org = teamId ? await db.getOrg(teamId) : null;
+      if (ctx.contextChannelId && org?.ai_excluded_channels?.includes(ctx.contextChannelId)) {
+        return {
+          search_mode: mode,
+          count: 0,
+          results: [],
+          note: 'Grantweaver is configured not to use AI over this channel. Ask an admin to change /grantweaver settings if that should change.',
+        };
+      }
       const allowedChannels = org ? new Set([...(org.watched_channels ?? []), ...(org.post_channels ?? [])]) : null;
+      const excludedChannels = new Set(org?.ai_excluded_channels ?? []);
       const inScope = allowedChannels?.size
         ? rawResults.filter((r) => !r.channel_id || allowedChannels.has(r.channel_id))
         : rawResults;
+      const policyScoped = inScope.filter((r) => !r.channel_id || !excludedChannels.has(r.channel_id));
       // Messages that are themselves conversations WITH or FROM the bot
       // (mentions, asks, the bot's own replies) aren't evidence — a channel
       // mention otherwise gets its own question (and the bot's last answer)
@@ -206,7 +216,7 @@ export function buildToolbelt(ctx) {
       // own bot name (not "any bot") keeps seeded evidence eligible while
       // dropping the app's own chatter.
       const botName = await getBotName(client);
-      const notSelfTalk = inScope.filter((r) =>
+      const notSelfTalk = policyScoped.filter((r) =>
         r.message_ts !== ctx.messageTs
         && !(botName && r.author?.toLowerCase() === botName.toLowerCase())
         && !(ctx.botUserId && (

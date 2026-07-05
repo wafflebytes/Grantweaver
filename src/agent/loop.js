@@ -4,6 +4,8 @@ import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 import { db } from '../services/db.js';
 import { fetchRecentHistory } from './memory.js';
 import { getLlm, withRetry, MODEL, MAX_TOKENS } from './llm.js';
+import { createRunTracker } from '../services/observability.js';
+import { deriveStatePatch, renderStateForPrompt, stateKey } from './state.js';
 
 export { completeOnce } from './llm.js';
 
@@ -72,6 +74,11 @@ export function looksEvidenceShaped(text) {
 }
 
 export async function runAgentTurn(ctx) {
+  const tracker = await createRunTracker(ctx, ctx.surface === 'dm' ? 'assistant.dm' : 'mention.channel').catch((e) => {
+    console.warn('[observability:start]', e?.message ?? e);
+    return null;
+  });
+  ctx.runTracker = tracker;
   const toolbelt = buildToolbelt(ctx);
 
   // Pre-classification fast path: fire the RTS call FIRST,
@@ -99,11 +106,13 @@ export async function runAgentTurn(ctx) {
         })
       : Promise.resolve([]);
 
-  const [org, pipeline, evidenceCount, evidenceIndex, prefetch, history] = await Promise.all([
+  const key = ctx.teamId && ctx.channelId ? stateKey(ctx) : null;
+  const [org, pipeline, evidenceCount, evidenceIndex, agentState, prefetch, history] = await Promise.all([
     ctx.teamId ? db.getOrg(ctx.teamId) : null,
     ctx.teamId ? db.listOpportunities(ctx.teamId) : [],
     ctx.teamId ? db.countEvidence(ctx.teamId) : 0,
     ctx.teamId ? db.listIndex(ctx.teamId) : [],
+    key ? db.getAgentState(key.teamId, key.channelId, key.threadTs).catch(() => null) : null,
     prefetchPromise,
     historyPromise,
   ]);
@@ -117,7 +126,10 @@ export async function runAgentTurn(ctx) {
     }, {})
   );
 
-  const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount, evidenceThemes, contextChannelId: ctx.contextChannelId });
+  const system = SYSTEM_PROMPT + renderOrgContext({
+    org, pipeline, evidenceCount, evidenceThemes, contextChannelId: ctx.contextChannelId,
+    activeContext: ctx.activeContext, stateText: renderStateForPrompt(agentState),
+  });
   const messages = [
     { role: 'system', content: system },
     ...history,
@@ -128,8 +140,14 @@ export async function runAgentTurn(ctx) {
   const getStreamer = () => (streamer ??= ctx.makeStreamer());
 
   let toolCalls = 0;
+  const toolNames = [];
+  const toolResults = [];
   if (prefetch) {
     toolCalls++;
+    toolNames.push('search_workspace');
+    toolResults.push(prefetch);
+    tracker?.recordToolCall('search_workspace');
+    tracker?.recordChannelsAccessed((prefetch.results ?? []).map((r) => r.channel_id));
     // An empty prefetch usually means the user's raw message was a poor
     // search query (drafting instructions, not an evidence question) — in
     // that case the model MUST re-search immediately, before the short-lived
@@ -144,7 +162,14 @@ export async function runAgentTurn(ctx) {
   }
 
   try {
-    return await runTurnLoop();
+    const result = await runTurnLoop();
+    if (result.partial) await tracker?.finishPartial().catch((e) => console.warn('[observability:finish]', e?.message ?? e));
+    else await tracker?.finishSuccess().catch((e) => console.warn('[observability:finish]', e?.message ?? e));
+    if (key) {
+      const patch = deriveStatePatch({ ctx, previousState: agentState, finalText: result.finalText, toolNames, toolResults });
+      await db.mergeAgentState(key.teamId, key.channelId, key.threadTs, patch).catch((e) => console.warn('[agent-state]', e?.message ?? e));
+    }
+    return result;
   } catch (e) {
     // Live-caught: an LLM call throwing here (timeout, network error) with
     // no catch left an already-started stream open forever — Slack showed
@@ -158,6 +183,7 @@ export async function runAgentTurn(ctx) {
       await getStreamer().append({ markdown_text: "Something snagged mid-turn 🧶 — the model or a tool call didn't come back in time. Try again in a moment." }).catch(() => {});
       await getStreamer().stop({}).catch(() => {});
     }
+    await tracker?.finishFailure(e).catch((err) => console.warn('[observability:failure]', err?.message ?? err));
     throw e;
   }
 
@@ -178,6 +204,7 @@ export async function runAgentTurn(ctx) {
         await getStreamer().append({ markdown_text: "Still working on this one — the model's taking a bit longer than usual…" });
       },
     );
+    tracker?.recordUsage(response.usage);
 
     // The model's internal reasoning competes with its answer AND its tool
     // calls for the same max_tokens budget, non-deterministically — a
@@ -193,6 +220,7 @@ export async function runAgentTurn(ctx) {
           tools: OPENAI_TOOLS, messages,
         })
       );
+      tracker?.recordUsage(response.usage);
     }
 
     const msg = response.choices[0].message;
@@ -205,11 +233,19 @@ export async function runAgentTurn(ctx) {
         await getStreamer().append({ markdown_text: chunk });
       }
       await getStreamer().stop({ blocks: buildFeedbackBlocks() });
-      return { title: inferTitle(ctx.userText), toolCalls };
+      return { title: inferTitle(ctx.userText), toolCalls, finalText };
     }
 
     messages.push(msg);
     for (const tu of toolUses) {
+      if (tracker?.id) {
+        const run = await db.getAgentRun(tracker.id).catch(() => null);
+        if (run?.cancel_requested_at) {
+          await getStreamer().append({ markdown_text: 'Cancellation requested — stopping before the next tool call.' }).catch(() => {});
+          await getStreamer().stop({ blocks: buildFeedbackBlocks() }).catch(() => {});
+          return { title: inferTitle(ctx.userText), toolCalls, finalText: 'Cancellation requested.', partial: true };
+        }
+      }
       toolCalls++;
       const label = TASK_LABELS[tu.function.name];
       const taskId = label ? await getStreamer().task(label, 'in_progress').catch(() => null) : null;
@@ -217,7 +253,12 @@ export async function runAgentTurn(ctx) {
       try {
         const exec = toolbelt[tu.function.name];
         const input = JSON.parse(tu.function.arguments || '{}');
+        toolNames.push(tu.function.name);
+        tracker?.recordToolCall(tu.function.name);
         result = exec ? await exec(input) : { error: `Unknown tool ${tu.function.name}` };
+        toolResults.push(result);
+        tracker?.recordChannelsAccessed([...(result?.results ?? []).map((r) => r.channel_id), ...(result?.channels_accessed ?? [])]);
+        if (result?.evidenceListUrl) tracker?.recordArtifact({ type: 'list', id: result.evidenceListUrl, url: result.evidenceListUrl });
         if (label) await getStreamer().task(label, 'complete', taskId).catch(() => {});
       } catch (e) {
         console.error(`[tool:${tu.function?.name}]`, e?.message ?? e);
@@ -234,7 +275,7 @@ export async function runAgentTurn(ctx) {
 
   await getStreamer().append({ markdown_text: "That one took more steps than I allow myself 🧶 — here's where I got to. Say *continue* and I'll pick it right up." });
   await getStreamer().stop({ blocks: buildFeedbackBlocks() });
-  return { title: inferTitle(ctx.userText), toolCalls };
+  return { title: inferTitle(ctx.userText), toolCalls, finalText: '', partial: true };
   }
 }
 

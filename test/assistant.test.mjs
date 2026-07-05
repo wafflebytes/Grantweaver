@@ -30,4 +30,10 @@ describe('buildSuggestedPrompts', () => {
     const prompts = buildSuggestedPrompts({ org: { mission: 'x' }, pipeline: [{ stage: 'drafting', close_date: soon }] });
     expect(prompts).toHaveLength(4);
   });
+
+  it('prioritizes current-channel prompt when active Slack context is known', () => {
+    const prompts = buildSuggestedPrompts({ org: { mission: 'x' }, pipeline: [], activeContext: { contextChannelId: 'C123' } });
+    expect(prompts[0].title).toBe('Use current channel');
+    expect(prompts).toHaveLength(4);
+  });
 });

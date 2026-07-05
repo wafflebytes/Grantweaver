@@ -199,7 +199,7 @@ CONFIRM]'. Which do you prefer?"
 "Our data shows a 40% improvement in outcomes across all programs." ← no
 source, invented aggregate, overclaimed scope.`;
 
-export function renderOrgContext({ org, pipeline, evidenceCount, evidenceThemes, contextChannelId }) {
+export function renderOrgContext({ org, pipeline, evidenceCount, evidenceThemes, contextChannelId, activeContext, stateText }) {
   const today = new Date().toISOString().slice(0, 10);
   // RAG-shaped, on purpose: this is a compact INDEX (theme + strength + hit
   // count), never raw text — content is always re-fetched live via
@@ -225,8 +225,11 @@ export function renderOrgContext({ org, pipeline, evidenceCount, evidenceThemes,
     ...pipeline.map((o) =>
       `- [${o.stage}] ${o.title} — ${o.agency ?? '?'} — closes ${o.close_date ?? '?'} — ceiling $${Number(o.award_ceiling ?? 0).toLocaleString()}${o.canvas_id ? ' (draft exists)' : ''} (opp_id: ${o.opp_id})`),
     contextChannelId
-      ? `User opened this chat while viewing <#${contextChannelId}> — consider scoping evidence searches there first.`
+      ? `Active Slack context: channel <#${contextChannelId}> — consider scoping evidence searches there first.`
       : '',
+    activeContext?.contextCanvasId ? `Active Slack context contains canvas/entity: ${activeContext.contextCanvasId}` : '',
+    activeContext?.contextListId ? `Active Slack context contains list/entity: ${activeContext.contextListId}` : '',
+    stateText || '',
     `Today's date: ${today}. Compute all day-counts from this.`,
   ];
   return lines.filter(Boolean).join('\n');

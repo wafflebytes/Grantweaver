@@ -347,6 +347,10 @@ export const db = {
     const { rows } = await pool.query('SELECT * FROM agent_runs WHERE team_id=$1 ORDER BY started_at DESC LIMIT $2', [teamId, limit]);
     return rows;
   },
+  async getAgentRun(runId) {
+    const { rows } = await pool.query('SELECT * FROM agent_runs WHERE id=$1', [runId]);
+    return rows[0] ?? null;
+  },
   async listAuditEvents(teamId, limit = 10) {
     const { rows } = await pool.query('SELECT * FROM agent_audit_events WHERE team_id=$1 ORDER BY created_at DESC LIMIT $2', [teamId, limit]);
     return rows;
@@ -453,6 +457,12 @@ export const db = {
     const { rows } = await pool.query(
       'SELECT * FROM pending_intents WHERE channel_id=$1 AND message_ts=$2', [channelId, messageTs]);
     return rows[0] ?? null;
+  },
+  async listPendingIntents(teamId, limit = 5) {
+    const { rows } = await pool.query(
+      "SELECT * FROM pending_intents WHERE team_id=$1 AND status IN ('pending','running') ORDER BY created_at DESC LIMIT $2",
+      [teamId, limit]);
+    return rows;
   },
   async claimIntent(intentId) {
     // Atomic pending→running so a double-click (button + ✅ reaction, or two

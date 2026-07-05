@@ -1,6 +1,7 @@
 import { runAgentTurn } from '../agent/loop.js';
 import { fetchThreadHistory } from '../agent/memory.js';
 import { makeThreadStreamer } from '../agent/streamer.js';
+import { db } from '../services/db.js';
 
 const COPY_ERROR_GENERIC = 'Something snagged on my end 🧶 — try that again in a moment, or ask me in a DM.';
 
@@ -27,11 +28,21 @@ export function registerMention(app) {
       .trim();
 
     try {
+      const teamId = event.team ?? context.teamId;
+      const org = teamId ? await db.getOrg(teamId) : null;
+      if (org?.ai_excluded_channels?.includes(event.channel)) {
+        await client.chat.postMessage({
+          channel: event.channel,
+          thread_ts: threadTs,
+          text: 'Grantweaver is configured not to use AI over this channel. Ask an admin to change `/grantweaver settings` if that should change.',
+        }).catch(() => {});
+        return;
+      }
       const history = await fetchThreadHistory(client, event.channel, threadTs, context.botUserId, event.ts);
       await runAgentTurn({
         client,
         surface: 'channel',
-        teamId: event.team ?? context.teamId,
+        teamId,
         userId: event.user,
         channelId: event.channel,
         threadTs,
@@ -47,7 +58,7 @@ export function registerMention(app) {
         history,
         makeStreamer: () => makeThreadStreamer({
           client, channel: event.channel, thread_ts: threadTs,
-          userId: event.user, teamId: event.team ?? context.teamId,
+          userId: event.user, teamId,
         }),
       });
     } catch (e) {

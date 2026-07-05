@@ -118,12 +118,14 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
   const org = await db.getOrg(teamId);
   const queries = scanQueries(org);
   const watched = new Set(org?.watched_channels ?? []);
+  const excluded = new Set(org?.ai_excluded_channels ?? []);
   const collected = []; // transient: {query_label, channel_id, channel_name, permalink, snippet, is_file}
   const mode = await detectSearchMode(client, teamId);
 
   if (watched.size) {
     await streamer?.task('Reading selected channels for evidence');
     for (const channelId of watched) {
+      if (excluded.has(channelId)) continue;
       collected.push(...await collectChannelEvidence(client, channelId));
     }
   }
@@ -139,7 +141,7 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
       const scoped = watched.size
         ? results.filter((r) => !r.channel_id || watched.has(r.channel_id))
         : results;
-      for (const r of scoped) {
+      for (const r of scoped.filter((r) => !r.channel_id || !excluded.has(r.channel_id))) {
         collected.push({
           query_label: q.label, channel_id: r.channel_id || '', channel_name: r.channel_name || null,
           message_ts: r.message_ts || '', permalink: r.permalink, snippet: r.snippet, is_file: r.kind === 'file',

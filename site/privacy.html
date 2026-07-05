@@ -15,7 +15,7 @@
 <section><div class="wrap">
   <div class="card">
     <h2>What we collect</h2>
-    <p>(1) The organization profile you type into setup (name, mission, focus areas, state, team size). (2) Grant pipeline records you create (public Grants.gov opportunity metadata plus stage). (3) Evidence <strong>pointers</strong>: Slack permalinks, channel IDs, message timestamps, and a tag. Never message text, files, or attachments. (4) Feedback ratings on Grantweaver's responses. (5) Standard service logs (event types and timestamps, no message content).</p>
+    <p>(1) The organization profile you type into setup (name, mission, focus areas, state, team size). (2) Grant pipeline records you create (public Grants.gov opportunity metadata plus stage). (3) Evidence <strong>pointers</strong>: Slack permalinks, channel IDs, message timestamps, and a tag. Never message text, files, or attachments. (4) Feedback ratings on Grantweaver's responses. (5) Agent state and logs: goals, tool names, run status, token counts if available, and sanitized errors, with no Slack message content.</p>
   </div>
 
   <div class="card">
@@ -25,7 +25,12 @@
 
   <div class="card">
     <h2>AI processing</h2>
-    <p>Requests are processed by a third-party large-language-model API (provider and model disclosed in our Marketplace submission); content transits the provider only for the duration of your request and is never stored by Grantweaver. Provider-side handling follows that provider's API terms, linked from our submission. We never train models on your data ourselves. AI outputs may contain errors, so always review drafts before submission.</p>
+    <p>Requests are processed through an OpenAI-compatible large-language-model API; the current agent model is MiniMax 2.7. Content transits the provider only for the duration of your request and is never stored by Grantweaver. Provider-side handling follows that provider's API terms. We never train models on your data ourselves. AI outputs may contain errors, so always review drafts before submission.</p>
+  </div>
+
+  <div class="card">
+    <h2>Controls</h2>
+    <p>Use <code>/grantweaver settings</code> to exclude channels from AI search and proactive scans. Use <code>/grantweaver logs</code> to inspect recent runs and <code>/grantweaver state</code> to inspect the privacy-safe state for a conversation. Use <code>/grantweaver reset</code> or email us to delete workspace data.</p>
   </div>
 
   <div class="card">

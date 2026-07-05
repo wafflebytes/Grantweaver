@@ -9,6 +9,50 @@ import { runDeadlineSweepOnce } from '../services/scheduler.js';
 import { reconcileListEdits, reconcileEvidenceListEdits } from '../services/lists.js';
 import { postMemoriesRecap } from '../services/memories.js';
 
+function stateBlocks(state) {
+  if (!state) return [{ type: 'section', text: { type: 'mrkdwn', text: '_No saved agent state for this conversation yet._' } }];
+  const latest = (items, render) => (items ?? []).slice(-3).reverse().map(render).join('\n') || '_None_';
+  return [
+    { type: 'header', text: { type: 'plain_text', text: 'Agent state' } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*Goal:* ${state.goal ?? 'unknown'}\n*Summary:* ${state.summary ?? '_None_'}\n*Source pointers:* ${(state.sources ?? []).length}` } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*Recent decisions*\n${latest(state.decisions, (d) => `• ${d.summary}`)}` } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*Artifacts*\n${latest(state.artifacts, (a) => `• ${a.summary ?? a.type}${a.url ? ` · <${a.url}|open>` : ''}`)}` } },
+  ];
+}
+
+function logsBlocks(runs) {
+  return [
+    { type: 'header', text: { type: 'plain_text', text: 'Recent Grantweaver runs' } },
+    ...(runs.length ? runs.map((r) => ({ type: 'section', text: { type: 'mrkdwn',
+      text: `*${new Date(r.started_at).toLocaleString('en-US')}* · ${r.surface} · *${r.status}* · ${r.total_latency_ms ?? '—'}ms\n${(r.tools_called ?? []).join(', ') || '_No tools_'} · ${r.model ?? 'model unknown'}${r.error_type ? ` · ${r.error_type}` : ''}` } }))
+      : [{ type: 'section', text: { type: 'mrkdwn', text: '_No runs logged yet._' } }]),
+  ];
+}
+
+function settingsModal(org) {
+  const excluded = org?.ai_excluded_channels ?? [];
+  return {
+    type: 'modal',
+    callback_id: 'gw_settings_submit',
+    title: { type: 'plain_text', text: 'Grantweaver settings' },
+    submit: { type: 'plain_text', text: 'Save' },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      { type: 'input', block_id: 'excluded', optional: true,
+        label: { type: 'plain_text', text: 'AI excluded channels' },
+        element: { type: 'multi_conversations_select', action_id: 'value',
+          initial_conversations: excluded, placeholder: { type: 'plain_text', text: 'Pick channels to exclude' },
+          filter: { include: ['public', 'private'], exclude_bot_users: true } } },
+      { type: 'input', block_id: 'proactive', optional: true,
+        label: { type: 'plain_text', text: 'Proactive workflows' },
+        element: { type: 'checkboxes', action_id: 'value',
+          initial_options: org?.proactive_enabled === false ? [] : [{ text: { type: 'plain_text', text: 'Enable watches and proactive nudges' }, value: 'enabled' }],
+          options: [{ text: { type: 'plain_text', text: 'Enable watches and proactive nudges' }, value: 'enabled' }] } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: '<https://grantweaver.app/privacy|Privacy> · <https://grantweaver.app/support|Support>' }] },
+    ],
+  };
+}
+
 function simulateAllowed(userId) {
   const allowed = (process.env.SIMULATE_ALLOWED_USERS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   return allowed.length === 0 || allowed.includes(userId);
@@ -23,6 +67,24 @@ export function registerCommands(app) {
     if (sub === 'setup') {
       const org = await db.getOrg(command.team_id);
       await client.views.open({ trigger_id: body.trigger_id, view: setupModal(org) });
+      return;
+    }
+
+    if (sub === 'state') {
+      const threadTs = command.thread_ts ?? '';
+      const state = await db.getAgentState(command.team_id, command.channel_id, threadTs)
+        ?? await db.getAgentState(command.team_id, command.channel_id, '');
+      return respond({ response_type: 'ephemeral', text: 'Agent state', blocks: stateBlocks(state) });
+    }
+
+    if (sub === 'logs') {
+      const runs = await db.listAgentRuns(command.team_id, 10);
+      return respond({ response_type: 'ephemeral', text: 'Recent Grantweaver runs', blocks: logsBlocks(runs) });
+    }
+
+    if (sub === 'settings') {
+      const org = await db.getOrg(command.team_id);
+      await client.views.open({ trigger_id: body.trigger_id, view: settingsModal(org) });
       return;
     }
 
@@ -150,5 +212,20 @@ export function registerCommands(app) {
     // help + anything unknown → same friendly card (never an error dump)
     return respond({ response_type: 'ephemeral',
       text: 'Grantweaver help', blocks: helpBlocks() });
+  });
+
+  app.view('gw_settings_submit', async ({ ack, body, view }) => {
+    await ack();
+    const excluded = view.state.values.excluded?.value?.selected_conversations ?? [];
+    const proactiveEnabled = Boolean((view.state.values.proactive?.value?.selected_options ?? []).find((o) => o.value === 'enabled'));
+    await db.setGovernanceSettings(body.team.id, {
+      ai_excluded_channels: excluded,
+      proactive_enabled: proactiveEnabled,
+      governance_settings: { updated_by: body.user.id, updated_at: new Date().toISOString() },
+    });
+    await db.logAuditEvent({
+      teamId: body.team.id, userId: body.user.id, eventType: 'governance_setting_changed',
+      subjectType: 'org', subjectId: body.team.id, metadata: { ai_excluded_channels: excluded, proactive_enabled: proactiveEnabled },
+    }).catch(() => {});
   });
 }

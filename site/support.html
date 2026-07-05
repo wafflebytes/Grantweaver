@@ -27,7 +27,22 @@
 
   <details>
     <summary>What does the AI do with our data?</summary>
-    <p>Your request plus the search results are processed by our LLM provider for the duration of the request; Grantweaver itself never stores your content, and we never train models on your data. Drafts always cite sources so you can verify every claim.</p>
+    <p>Your request plus live search results are processed by MiniMax 2.7 through an OpenAI-compatible API for the duration of the request; Grantweaver itself never stores Slack content, and we never train models on your data. Drafts always cite sources so you can verify every claim.</p>
+  </details>
+
+  <details>
+    <summary>How do I see what Grantweaver did?</summary>
+    <p>Run <code>/grantweaver logs</code> for recent runs, tool names, status, latency, model, and sanitized errors. Run <code>/grantweaver state</code> in a DM or thread to inspect the saved goal, artifact pointers, source pointer count, and summary.</p>
+  </details>
+
+  <details>
+    <summary>How do I exclude a channel?</summary>
+    <p>Run <code>/grantweaver settings</code> and choose channels under "AI excluded channels." Grantweaver will not search or scan excluded channels, and if mentioned there it will explain that AI is disabled for that channel.</p>
+  </details>
+
+  <details>
+    <summary>How do I inspect or delete state?</summary>
+    <p>Run <code>/grantweaver state</code> to inspect conversation state. Run <code>/grantweaver reset</code> to clear the workspace profile, pipeline, evidence pointers, watches, and index; Slack Canvases and Lists remain in Slack as orphaned artifacts.</p>
   </details>
 
   <details>
