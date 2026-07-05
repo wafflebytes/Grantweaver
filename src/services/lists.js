@@ -214,11 +214,20 @@ export async function syncEvidenceToList(client, teamId, ptr) {
       ...(columns.link && ptr.permalink ? [{ column_id: columns.link, link: [{ original_url: ptr.permalink, display_as_url: false }] }] : []),
     ].filter((f) => f.column_id);
     if (ptr.list_item_id) {
-      await client.apiCall('slackLists.items.update', {
-        list_id: listId,
-        cells: fields.map((f) => ({ row_id: ptr.list_item_id, column_id: f.column_id, ...omitColumnId(f) })),
-      });
-      return ptr.list_item_id;
+      try {
+        await client.apiCall('slackLists.items.update', {
+          list_id: listId,
+          cells: fields.map((f) => ({ row_id: ptr.list_item_id, column_id: f.column_id, ...omitColumnId(f) })),
+        });
+        return ptr.list_item_id;
+      } catch (e) {
+        // A stored list_item_id can go stale (e.g. the List itself got
+        // recreated) — the old id belongs to a different/deleted list, so
+        // items.update fails and the row silently never appears in the
+        // CURRENT list. Fall through to create a fresh row instead of
+        // dropping this pointer entirely.
+        console.warn('[lists] evidence update failed, recreating row:', e?.data?.error ?? e.message);
+      }
     }
     const created = await client.apiCall('slackLists.items.create', { list_id: listId, initial_fields: fields });
     const itemId = created.item?.id;

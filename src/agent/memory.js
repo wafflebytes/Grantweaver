@@ -1,3 +1,5 @@
+import { NON_CONTENT_SUBTYPES } from '../services/scan.js';
+
 // Agent turns are otherwise stateless: a follow-up like "the OJJDP one
 // please, draft it now" arrives with zero memory of what a prior turn found.
 // Both fns pull a short window of history transiently, in-prompt, for one
@@ -39,13 +41,20 @@ function fullText(m) {
 }
 const hasContent = (m) => Boolean(m.text) || Boolean(m.blocks?.length);
 
+// Live-caught (same root cause as scan.js's collectChannelEvidence): every
+// message a persona-seeder app posts (username/icon_url override) arrives
+// with subtype:'bot_message' — blanket-excluding ANY subtyped message made
+// entire seeded/relayed conversations invisible as agent context, not just
+// genuine system noise (channel_join, topic changes, etc).
+const isNoise = (m) => m.subtype && NON_CONTENT_SUBTYPES.has(m.subtype);
+
 export async function fetchRecentHistory(client, channelId, botUserId, currentTs) {
   const { messages = [] } = await client.conversations.history({
     channel: channelId,
     limit: HISTORY_TURNS + 1,
   });
   return messages
-    .filter((m) => !m.subtype && hasContent(m) && m.ts !== currentTs) // drop the just-arrived message itself
+    .filter((m) => !isNoise(m) && hasContent(m) && m.ts !== currentTs) // drop the just-arrived message itself
     .slice(0, HISTORY_TURNS) // Slack returns newest-first
     .reverse()
     .map((m) => ({ role: botUserId && m.user === botUserId ? 'assistant' : 'user', content: fullText(m) }));
@@ -59,10 +68,13 @@ export async function fetchThreadHistory(client, channelId, threadTs, botUserId,
     channel: channelId, ts: threadTs, limit: cap + 1,
   });
   return messages
-    .filter((m) => !m.subtype && hasContent(m) && m.ts !== currentTs)
+    .filter((m) => !isNoise(m) && hasContent(m) && m.ts !== currentTs)
     .slice(-cap) // conversations.replies returns oldest-first
     .map((m) => ({
       role: m.user === botUserId ? 'assistant' : 'user',
-      content: m.user === botUserId ? fullText(m) : `<@${m.user}>: ${m.text ?? ''}`,
+      // Persona-seeded messages (bot_message subtype) have no m.user —
+      // fall back to the username override so the speaker is still
+      // attributed instead of rendering as "<@undefined>:".
+      content: m.user === botUserId ? fullText(m) : `${m.user ? `<@${m.user}>` : (m.username ?? 'teammate')}: ${m.text ?? ''}`,
     }));
 }

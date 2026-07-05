@@ -42,6 +42,16 @@ function heuristicStrength(hits) {
 
 const EVIDENCE_HINT = /\b(\d+[%/ ]|\bpercent\b|\battendance\b|\bgpa\b|\bgrade\b|\baccepted\b|\bcollege\b|\bsurvey\b|\btestimonial\b|\bthank|thanks|grateful|quote|story|impact|outcome|improved|increase|decrease|served|hours|mentees|students|participants|volunteers)\b/i;
 const FILE_EVIDENCE_HINT = /\.(pdf|png|jpe?g|csv|xlsx?|docx?)\b/i;
+// Only truly contentless system events belong here. Live-caught: EVERY
+// message a persona-seeder app posts (username/icon_url override) arrives
+// with subtype:'bot_message' — the old allowlist (only 'file_share' let
+// through) silently skipped nearly an entire seeded/relayed workspace's
+// worth of real, substantive text ("42 of 47 mentees improved school
+// attendance...") because it looked like bot noise, not content.
+export const NON_CONTENT_SUBTYPES = new Set([
+  'channel_join', 'channel_leave', 'channel_topic', 'channel_purpose', 'channel_name',
+  'channel_archive', 'channel_unarchive', 'pinned_item', 'unpinned_item', 'group_join', 'group_leave',
+]);
 
 function classifyLocalHit(text, hasFile) {
   const t = String(text ?? '').toLowerCase();
@@ -80,7 +90,7 @@ async function collectChannelEvidence(client, channelId, limit = 200) {
       });
     if (!res) break;
     for (const m of res.messages ?? []) {
-      if (m.subtype && m.subtype !== 'file_share') continue;
+      if (m.subtype && NON_CONTENT_SUBTYPES.has(m.subtype)) continue;
       const files = m.files ?? [];
       const fileText = files.map((f) => `${f.title ?? ''} ${f.name ?? ''} ${f.filetype ?? ''}`).join(' ');
       const text = `${m.text ?? ''} ${fileText}`.trim();
