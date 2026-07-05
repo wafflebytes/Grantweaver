@@ -77,8 +77,15 @@ async function grantListAccess(client, listId, org, label) {
     ...(org?.memories_channel ? [org.memories_channel] : []),
   ])];
   if (!channelIds.length) return;
-  await client.apiCall('slackLists.access.set', { list_id: listId, access_level: 'write', channel_ids: channelIds })
-    .catch((e) => console.warn(`[lists:${label}:access]`, e?.data?.error ?? e.message));
+  // Live-verified: despite docs implying channel_ids takes an array,
+  // slackLists.access.set actually rejects more than one at a time
+  // ("no more than 1 items allowed [json-pointer:/channel_ids]") — grant
+  // one channel per call, and don't let one bad/inaccessible channel ID
+  // block access for the rest.
+  for (const channelId of channelIds) {
+    await client.apiCall('slackLists.access.set', { list_id: listId, access_level: 'write', channel_ids: [channelId] })
+      .catch((e) => console.warn(`[lists:${label}:access]`, channelId, e?.data?.error ?? e.message));
+  }
 }
 
 function checklistPct(opp) {
