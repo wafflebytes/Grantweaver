@@ -74,7 +74,7 @@ registerIntentExecutor('revise', async (client, intent) => {
     .filter((m) => !m.subtype && m.text)
     .map((m) => `<@${m.user}>: ${m.text}`)
     .join('\n');
-  await streamer.task('Read the thread', 'completed', readTaskId);
+  await streamer.task('Read the thread', 'complete', readTaskId);
 
   // Branch B: no live read-back of the current Draft section —
   // we ask the model to revise from the LAST version we ourselves wrote,
@@ -89,7 +89,7 @@ registerIntentExecutor('revise', async (client, intent) => {
     { role: 'user', content: revisePrompt({ current: lastKnownDraft, requests }) },
   ], { maxTokens: 4000 });
   const { draft, diff } = parseRevision(text);
-  await streamer.task('Wove in the changes', 'completed', weaveTaskId);
+  await streamer.task('Wove in the changes', 'complete', weaveTaskId);
 
   await db.setCanvasWritten(teamId, opp_id);
   await db.logActivity(teamId, opp_id, { actor: intent.requested_by, kind: 'revision', summary: 'Draft revised from thread requests' });

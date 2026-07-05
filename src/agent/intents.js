@@ -122,7 +122,7 @@ registerIntentExecutor('draft', async (client, intent) => {
     const results = await searchWorkspace(client, {
       query: mode === 'keyword' ? expandKeywordQuery(query) : query, contentTypes: ['messages', 'files'], teamId,
     }).catch(() => []);
-    await streamer.task('Searched your workspace for evidence', 'completed', searchTaskId);
+    await streamer.task('Searched your workspace for evidence', 'complete', searchTaskId);
     const draftTaskId = await streamer.task('Writing the draft');
     const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount: pinnedEvidence.length + results.length, contextChannelId: undefined });
     const userMsg = [
@@ -138,7 +138,7 @@ registerIntentExecutor('draft', async (client, intent) => {
       { role: 'system', content: system },
       { role: 'user', content: userMsg },
     ], { maxTokens: 3000 });
-    await streamer.task('Wrote the draft', 'completed', draftTaskId);
+    await streamer.task('Wrote the draft', 'complete', draftTaskId);
   }
 
   const citations = [...markdown.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]*archives[^)]*)\)/g)];

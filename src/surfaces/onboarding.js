@@ -130,7 +130,7 @@ async function runOnboardingScan(client, { teamId, channel, threadTs, userId, ac
   const summary = await runWorkspaceScan(client, teamId, {
     task: async (label) => { scanTaskId = await streamer.task(label, 'in_progress', scanTaskId); },
   }, { actionToken });
-  if (scanTaskId) await streamer.task('Scan complete', 'completed', scanTaskId);
+  if (scanTaskId) await streamer.task('Scan complete', 'complete', scanTaskId);
 
   let saved = 0;
   const seen = new Set();
