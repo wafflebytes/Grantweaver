@@ -56,6 +56,31 @@ function textCell(value) {
   };
 }
 
+// Grants a newly-created List write access so it isn't stuck private to its
+// creator (the bot) — live-reported: /grantweaver setup only ever collects
+// watched_channels (real channel IDs, from the modal's
+// multi_conversations_select) now that the old conversational onboarding
+// flow (the only path that ever wrote org.post_channels, by NAME) is
+// disabled. Grant access to every channel we actually have on file — a
+// user opening the List link from a channel we're not scoped to otherwise
+// hit Slack's native "Request access" wall with no route around it.
+async function grantListAccess(client, listId, org, label) {
+  const postNames = org?.post_channels ?? [];
+  let resolvedPostIds = [];
+  if (postNames.length) {
+    const { channels = [] } = await client.conversations.list({ types: 'public_channel', limit: 200 }).catch(() => ({}));
+    resolvedPostIds = postNames.map((n) => channels.find((c) => c.name === n)?.id).filter(Boolean);
+  }
+  const channelIds = [...new Set([
+    ...(org?.watched_channels ?? []), ...resolvedPostIds,
+    ...(org?.digest_channel ? [org.digest_channel] : []),
+    ...(org?.memories_channel ? [org.memories_channel] : []),
+  ])];
+  if (!channelIds.length) return;
+  await client.apiCall('slackLists.access.set', { list_id: listId, access_level: 'write', channel_ids: channelIds })
+    .catch((e) => console.warn(`[lists:${label}:access]`, e?.data?.error ?? e.message));
+}
+
 function checklistPct(opp) {
   const items = opp.checklist ?? [];
   if (!items.length) return null;
@@ -100,24 +125,7 @@ export async function ensurePipelineList(client, teamId) {
   const listId = created.list_id;
   const columns = Object.fromEntries((created.list_metadata?.schema ?? []).map((c) => [c.key, c.id]));
   await db.setPipelineList(teamId, listId, columns);
-  // Live-reported bug: a List created via the API is private to its
-  // creator (the bot) by default, same as a fresh canvas — canvas.js
-  // already grants channel access after creation, but this never did,
-  // so every other team member hit "you don't have access" opening the
-  // Home tab's link. Share write access to the org's post channel(s)
-  // (#grants by default) so the whole team the pipeline is FOR can use it.
-  // org.post_channels stores bare NAMES ("grants"), not IDs — resolve
-  // before calling access.set, which needs real channel_ids.
-  const postNames = org?.post_channels ?? [];
-  if (postNames.length) {
-    const { channels = [] } = await client.conversations.list({ types: 'public_channel', limit: 200 }).catch(() => ({}));
-    const channelIds = postNames.map((n) => channels.find((c) => c.name === n)?.id).filter(Boolean);
-    if (channelIds.length) {
-      await client.apiCall('slackLists.access.set', {
-        list_id: listId, access_level: 'write', channel_ids: channelIds,
-      }).catch((e) => console.warn('[lists:access]', e?.data?.error ?? e.message));
-    }
-  }
+  await grantListAccess(client, listId, org, 'pipeline');
   return { listId, columns };
 }
 
@@ -173,15 +181,7 @@ export async function ensureEvidenceList(client, teamId) {
   const listId = created.list_id;
   const columns = Object.fromEntries((created.list_metadata?.schema ?? []).map((c) => [c.key, c.id]));
   await db.setEvidenceList(teamId, listId, columns);
-  const postNames = org?.post_channels ?? [];
-  if (postNames.length) {
-    const { channels = [] } = await client.conversations.list({ types: 'public_channel', limit: 200 }).catch(() => ({}));
-    const channelIds = postNames.map((n) => channels.find((c) => c.name === n)?.id).filter(Boolean);
-    if (channelIds.length) {
-      await client.apiCall('slackLists.access.set', { list_id: listId, access_level: 'write', channel_ids: channelIds })
-        .catch((e) => console.warn('[lists:evidence:access]', e?.data?.error ?? e.message));
-    }
-  }
+  await grantListAccess(client, listId, org, 'evidence');
   return { listId, columns };
 }
 

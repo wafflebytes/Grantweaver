@@ -29,7 +29,9 @@ export function registerHome(app) {
     await ack();
     const [oppId, stage] = action.selected_option.value.split('|');
     const teamId = body.team.id;
+    const before = (await db.listOpportunities(teamId)).find((o) => o.opp_id === String(oppId));
     await db.moveOpportunity(teamId, oppId, stage);
+    await db.logActivity(teamId, oppId, { actor: body.user.id, kind: 'stage_move', summary: `Home stage → ${stage}`, metadata: { previous_stage: before?.stage, new_stage: stage } });
     // Live gap found in review: this was the one stage-move surface that
     // never synced the List row — every other path (chat, modal, buttons)
     // already did.
@@ -41,8 +43,11 @@ export function registerHome(app) {
 
 export async function publishHome(client, teamId, userId) {
   if (!teamId) teamId = (await client.auth.test()).team_id;
-  const [org, opps, evid, meter] = await Promise.all([
+  const [org, opps, evid, meter, intents, runs, audits] = await Promise.all([
     db.getOrg(teamId), db.listOpportunities(teamId), db.listEvidence(teamId, 5), db.impactMeter(teamId),
+    db.listPendingIntents(teamId, 5).catch(() => []),
+    db.listAgentRuns(teamId, 5).catch(() => []),
+    db.listAuditEvents(teamId, 5).catch(() => []),
   ]);
 
   const blocks = [
@@ -74,6 +79,9 @@ export async function publishHome(client, teamId, userId) {
     { type: 'context', elements: [{ type: 'mrkdwn',
       text: '_Hours-saved math: 2h per draft + 30m per evidence item + 15m per match. Honest heuristic, no magic._' }] },
     { type: 'divider' },
+    { type: 'header', text: { type: 'plain_text', text: 'Workflow status' } },
+    ...workflowBlocks(intents, runs, audits),
+    { type: 'divider' },
     { type: 'header', text: { type: 'plain_text', text: '⏰ Upcoming deadlines' } },
     ...deadlineBlocks(opps),
     { type: 'divider' },
@@ -83,9 +91,14 @@ export async function publishHome(client, teamId, userId) {
           text: '_Your pipeline is empty. Open my agent panel and try *“Find new grants that fit our mission.”*_' } }]),
     { type: 'divider' },
     { type: 'header', text: { type: 'plain_text', text: '🧶 Recent evidence' } },
+    // File-backed evidence has no real channel — db.saveEvidence synthesizes
+    // channel_id='file' for those rows so the unique constraint doesn't
+    // collapse distinct files into one row. Slack can't resolve <#file> to a
+    // real channel and renders it as a generic "#private-channel"
+    // placeholder — show a file badge instead of a fake channel mention.
     ...(evid.length
       ? evid.map((e) => ({ type: 'section', text: { type: 'mrkdwn',
-          text: `*${e.tag}* · <#${e.channel_id}> · ${new Date(e.saved_at).toLocaleDateString('en-US')}${e.permalink ? ` · <${e.permalink}|view>` : ''}` } }))
+          text: `*${e.tag}* · ${e.channel_id && e.channel_id !== 'file' ? `<#${e.channel_id}>` : '📎 file'} · ${new Date(e.saved_at).toLocaleDateString('en-US')}${e.permalink ? ` · <${e.permalink}|view>` : ''}` } }))
       : [{ type: 'section', text: { type: 'mrkdwn',
           text: `_No evidence yet — react :${org?.evidence_emoji ?? 'thread'}: on any impactful message, or ask me to search the workspace._` } }]),
     { type: 'context', elements: [{ type: 'mrkdwn',
@@ -93,6 +106,26 @@ export async function publishHome(client, teamId, userId) {
   ];
 
   await client.views.publish({ user_id: userId, view: { type: 'home', blocks } });
+}
+
+function workflowBlocks(intents, runs, audits) {
+  const blocks = [];
+  const failed = runs.filter((r) => ['failure', 'partial', 'blocked'].includes(r.status)).slice(0, 3);
+  const recent = runs.filter((r) => r.status === 'success').slice(0, 3);
+  if (intents.length) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Pending confirmations*\n${intents.map((i) => `• ${i.kind} · ${i.status} · #${i.id}`).join('\n')}` } });
+  }
+  if (failed.length) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Needs attention*\n${failed.map((r) => `• ${r.surface} · ${r.status} · ${r.error_type ?? 'check logs'}`).join('\n')}` } });
+  }
+  if (recent.length) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Recent completions*\n${recent.map((r) => `• ${r.surface} · ${(r.tools_called ?? []).join(', ') || 'reply'} · ${r.total_latency_ms ?? '—'}ms`).join('\n')}` } });
+  }
+  const warnings = audits.filter((a) => ['runaway_warning', 'blocked', 'failure'].includes(a.event_type)).slice(0, 2);
+  if (warnings.length) {
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Warnings: ${warnings.map((a) => a.event_type).join(', ')}` }] });
+  }
+  return blocks.length ? blocks : [{ type: 'section', text: { type: 'mrkdwn', text: '_No running or failed workflows._' } }];
 }
 
 function deadlineBlocks(opps) {
