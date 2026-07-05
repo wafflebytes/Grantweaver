@@ -123,9 +123,14 @@ async function runOnboardingScan(client, { teamId, channel, threadTs, userId, ac
   const kickoff = await client.chat.postMessage({ channel, text: COPY.scanning });
   const threadTsForStream = threadTs ?? kickoff.ts;
   const streamer = makeThreadStreamer({ client, channel, thread_ts: threadTsForStream, userId, teamId });
+  // One single-line spinner whose TEXT changes per step, not a new task
+  // card per step — passing the same id back to streamer.task() updates
+  // that line in place instead of appending a fresh one underneath it.
+  let scanTaskId;
   const summary = await runWorkspaceScan(client, teamId, {
-    task: (label) => streamer.task(label),
+    task: async (label) => { scanTaskId = await streamer.task(label, 'in_progress', scanTaskId); },
   }, { actionToken });
+  if (scanTaskId) await streamer.task('Scan complete', 'completed', scanTaskId);
 
   let saved = 0;
   const seen = new Set();
