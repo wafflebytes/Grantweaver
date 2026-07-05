@@ -54,7 +54,7 @@ export const db = {
   pool, // exposed for tests only
 
   async migrateIfNeeded() {
-    for (const f of ['001_init.sql', '002_phase2.sql', '003_evidence_merge.sql', '004_greeted_users.sql', '005_memories_channel.sql', '006_evidence_list.sql', '007_agent_context_state.sql', '008_governance_settings.sql', '009_agent_observability.sql']) {
+    for (const f of ['001_init.sql', '002_phase2.sql', '003_evidence_merge.sql', '004_greeted_users.sql', '005_memories_channel.sql', '006_evidence_list.sql', '007_agent_context_state.sql', '008_governance_settings.sql', '009_agent_observability.sql', '010_dm_greetings.sql']) {
       const sql = await fs.readFile(new URL(`../../migrations/${f}`, import.meta.url), 'utf8');
       await pool.query(sql); // each file is fully idempotent (IF NOT EXISTS)
     }
@@ -74,10 +74,20 @@ export const db = {
     return Boolean(org?.greeted_users?.includes(userId));
   },
   async markGreeted(teamId, userId) {
-    await pool.query(
-      `UPDATE orgs SET greeted_users = array_append(greeted_users, $2)
+    const { rowCount } = await pool.query(
+      `UPDATE orgs SET greeted_users = array_append(COALESCE(greeted_users, '{}'), $2)
        WHERE team_id=$1 AND NOT ($2 = ANY(COALESCE(greeted_users, '{}')))`,
       [teamId, userId]);
+    return rowCount > 0;
+  },
+  async claimDmGreeting(teamId, userId, channelId) {
+    if (!teamId || !userId || !channelId) return false;
+    const { rowCount } = await pool.query(
+      `INSERT INTO dm_greetings (team_id, user_id, channel_id)
+       VALUES ($1,$2,$3)
+       ON CONFLICT DO NOTHING`,
+      [teamId, userId, channelId]);
+    return rowCount > 0;
   },
   async upsertOrg(teamId, fields) {
     const cur = (await this.getOrg(teamId)) ?? {};
@@ -525,7 +535,14 @@ export const db = {
     // Callers pass this straight to lists.syncEvidenceToList so a re-save
     // (e.g. the message shortcut used twice) UPDATEs the existing List row
     // instead of creating a duplicate — same shape as opportunities.list_item_id.
-    return { listItemId: rows[0]?.list_item_id ?? null };
+    // Also return the ACTUAL channel_id/message_ts used (post file-synthesis
+    // above) — every caller was previously reusing its own pre-synthesis
+    // '' / '' pair for the follow-up setEvidenceListItem() write, which
+    // matched zero rows against the real 'file' / <permalink> row. That
+    // silently meant list_item_id never actually persisted for ANY file
+    // pointer, so every rescan re-read list_item_id as null and created a
+    // brand new duplicate List row for the same file, forever.
+    return { listItemId: rows[0]?.list_item_id ?? null, channel_id: ptr.channel_id, message_ts: ptr.message_ts };
   },
   async bumpIndexFromEvidence(teamId, { theme, channel_id, permalink, is_file }) {
     const { rows } = await pool.query(

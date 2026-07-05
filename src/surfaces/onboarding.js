@@ -139,15 +139,15 @@ async function runOnboardingScan(client, { teamId, channel, threadTs, userId, ac
     if (seen.has(key)) continue;
     seen.add(key);
     try {
-      const { listItemId } = await db.saveEvidence(teamId, {
+      const { listItemId, channel_id, message_ts } = await db.saveEvidence(teamId, {
         channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
         tag: p.tag, is_file: p.is_file, saved_by: userId,
       });
-      const channelInfo = p.channel_id && p.channel_id !== 'file'
-        ? await client.conversations.info({ channel: p.channel_id }).catch(() => null)
+      const channelInfo = channel_id && channel_id !== 'file'
+        ? await client.conversations.info({ channel: channel_id }).catch(() => null)
         : null;
       await syncEvidenceToList(client, teamId, {
-        channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
+        channel_id, message_ts, permalink: p.permalink ?? '',
         tag: p.tag, is_file: p.is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
         label: p.label,
       }).catch(() => {});
