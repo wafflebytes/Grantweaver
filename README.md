@@ -151,50 +151,107 @@ Agents that act need receipts.
 ## How it fits together
 
 ```mermaid
-architecture-beta
-    group slack(cloud)[Slack Workspace]
-    group slack_ai(cloud)[Slack AI Surfaces] in slack
-    group app(server)[Grantweaver Service]
-    group mcp(server)[MCP Servers]
-    group data_ext(internet)[Data & External Services]
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'background': '#0c100d',
+    'primaryColor': '#0c100d',
+    'primaryTextColor': '#f8fafc',
+    'primaryBorderColor': '#2d6a4f',
+    'lineColor': '#e2e8f0',
+    'secondaryColor': '#0c100d',
+    'tertiaryColor': '#eab308',
+    'fontFamily': '"SF Pro Rounded", "Virgil", "Comic Sans MS", cursive, sans-serif',
+    'fontSize': '14px'
+  },
+  'flowchart': {
+    'curve': 'linear',
+    'rankSpacing': 50,
+    'nodeSpacing': 20
+  }
+}}%%
+flowchart LR
+  %% Styling Definitions for Dark Mode Sketch (High Contrast Outlines)
+  classDef slackNode fill:none,stroke:#00ffd0,stroke-width:2.5px,color:#ffffff;
+  classDef mcpNode fill:none,stroke:#c084fc,stroke-width:2.5px,color:#ffffff;
+  classDef engineNode fill:none,stroke:#eab308,stroke-width:2px,color:#ffffff;
+  classDef externalNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
 
-    service slack_interface(server)[Slack Chat UI] in slack
-    service slack_history(disk)[Message History] in slack
-    
-    service lists(disk)[Slack Lists] in slack_ai
-    service canvases(disk)[Slack Canvases] in slack_ai
+  subgraph C1["1. CLIENT INTERFACES (Slack Workspace)"]
+    direction TB
+    EXT["🤖 Claude / Cursor<br/>HTTP API Client"]
+    DM["💬 Agent DM<br/>[Slack AI Surface]"]
+    MEN["🤖 @mentions<br/>[Slack AI Surface]"]
+    RX["⚡ Reactions / Shortcuts<br/>[Slack AI Surface]"]
+  end
+  class DM,MEN,RX slackNode;
+  class EXT externalNode;
 
-    service router(server)[App Router] in app
-    service orchestrator(server)[Agent Orchestrator] in app
-    service rts(server)[Slack RTS API] in app
-    service obs(server)[Observability] in app
+  subgraph C2["2. APP ENGINE (Grantweaver Service)"]
+    direction TB
+    LOOP["Agent Loop<br/>src/agent/loop.js"]
+    TOOLS["Toolbelt · 8 tools<br/>src/agent/tools.js"]
+    OBS["Observability<br/>src/services/observability.js"]
+    CRON["Scheduler / Cron<br/>src/services/scheduler.js"]
+    INTENTS["Intents Handler<br/>src/agent/intents.js"]
+  end
+  class LOOP,TOOLS,INTENTS,CRON,OBS engineNode;
 
-    service gg(server)[grantsgov-mcp] in mcp
-    service gw(server)[grantweaver-mcp] in mcp
+  subgraph C3["3. DATA & SURFACES"]
+    direction TB
+    GW["🔌 grantweaver-mcp<br/>[MCP Server - Exposed]"]
+    GG["📦 grantsgov-mcp<br/>[MCP Server - Consumed]"]
+    RTS["🔍 Slack RTS API<br/>[Slack Real-Time Search]"]
+    DB[("🛢️ Postgres Database<br/>pointers only, no text")]
+    HOME["🏠 App Home<br/>[Slack AI Surface]"]
+    WEB["💻 Evidence Pages<br/>marketing & web view"]
+    LISTS["📋 Slack Lists ×2<br/>[Slack AI Surface]"]
+    CANVAS["📄 Canvases<br/>[Slack AI Surface]"]
+  end
+  class DB greenNode;
+  class RTS,HOME,LISTS,CANVAS slackNode;
+  class GG,GW mcpNode;
+  class WEB externalNode;
 
-    service db(database)[Postgres DB] in data_ext
-    service gov(internet)[api.grants.gov] in data_ext
+  GOV["🌐 api.grants.gov<br/>external API"]
+  class GOV externalNode;
 
-    %% Connections
-    slack_interface:R --> L:router
-    router:R --> L:orchestrator
-    
-    slack_history:R --> L:rts
-    rts:R --> L:orchestrator
-    db:L --> R:orchestrator
+  %% Subgraph Styles - Deep Shading for Groups
+  style C1 fill:#0e1b13,stroke:#00ffd0,stroke-width:1.5px,stroke-dasharray: 5 5;
+  style C2 fill:#201804,stroke:#eab308,stroke-width:1.5px,stroke-dasharray: 5 5;
+  style C3 fill:#131517,stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray: 5 5;
 
-    orchestrator:R --> L:gg
-    gg:R --> L:gov
-    orchestrator:B --> T:obs
-    obs:B --> T:db
-    
-    orchestrator:B --> T:gw
-    gw:B --> T:db
+  %% --- CONNECTIONS ---
+  
+  %% Clients -> Engine
+  EXT -- "HTTP" --> GW
+  DM --> LOOP
+  MEN --> LOOP
+  RX --> INTENTS
 
-    orchestrator:L --> R:router
-    router:B --> T:canvases
-    router:B --> T:lists
-    router:B --> T:slack_interface
+  %% Engine internal
+  LOOP --> TOOLS
+  LOOP --> OBS
+
+  %% Engine -> Data & Surfaces
+  TOOLS -- "RTS" --> RTS
+  RTS -- "search" --> C1
+  
+  TOOLS -- "MCP" --> GG
+  GG -- "fetch" --> GOV
+  
+  TOOLS --> DB
+  TOOLS --> CANVAS
+  TOOLS --> LISTS
+  
+  INTENTS --> CANVAS
+  
+  CRON <--> LISTS
+  CRON --> DB
+  OBS --> DB
+  GW --- DB
+  HOME --- DB
+  WEB --- DB
 ```
 
 And one turn, end to end. This is why drafts can cite without storing:
