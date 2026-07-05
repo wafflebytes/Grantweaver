@@ -63,7 +63,21 @@ export function makeThreadStreamer({ client, channel, thread_ts, userId, teamId 
         await client.chat.postMessage({ channel, thread_ts, text: 'Done 🧶', ...(blocks ? { blocks } : {}) });
         return;
       }
-      await client.apiCall('chat.stopStream', { channel, ts: started.ts, ...(blocks ? { blocks } : {}) });
+      try {
+        await client.apiCall('chat.stopStream', { channel, ts: started.ts, ...(blocks ? { blocks } : {}) });
+      } catch (e) {
+        // Live-caught: a long-running turn (e.g. the onboarding scan, which
+        // can legitimately run for minutes) outlives Slack's own server-side
+        // stream lifetime — by the time stop() runs, the stream has already
+        // gone stale and chat.stopStream fails with
+        // message_not_in_streaming_state. Letting that throw meant the
+        // caller's generic error handler fired and showed the user
+        // "something snagged" even though the underlying work had actually
+        // succeeded. Fall back to a plain message with the same content
+        // instead of losing the result.
+        if (e?.data?.error !== 'message_not_in_streaming_state') throw e;
+        await client.chat.postMessage({ channel, thread_ts, text: 'Done 🧶', ...(blocks ? { blocks } : {}) });
+      }
     },
   };
 }
