@@ -4,6 +4,35 @@
 
 const capabilityCache = new Map(); // teamId -> 'semantic' | 'keyword'
 
+// assistant.search.context has no "exclude archived" param and happily
+// returns hits from archived channels (e.g. clean-slate's renamed
+// "#general-old-jul4") — those are dead history, never real evidence.
+// Cache each team's archived-channel set briefly rather than calling
+// conversations.list on every search.
+const archivedCache = new Map(); // teamId -> { ids: Set<string>, at: number }
+const ARCHIVED_TTL_MS = 5 * 60 * 1000;
+
+async function getArchivedChannelIds(client, teamId) {
+  if (!teamId) return new Set();
+  const cached = archivedCache.get(teamId);
+  if (cached && Date.now() - cached.at < ARCHIVED_TTL_MS) return cached.ids;
+  const ids = new Set();
+  try {
+    let cursor;
+    do {
+      const res = await client.conversations.list({
+        types: 'public_channel', exclude_archived: false, limit: 200, cursor,
+      });
+      for (const c of res.channels ?? []) if (c.is_archived) ids.add(c.id);
+      cursor = res.response_metadata?.next_cursor;
+    } while (cursor);
+  } catch (e) {
+    console.warn('[rts] failed to list archived channels:', e?.data?.error ?? e?.message);
+  }
+  archivedCache.set(teamId, { ids, at: Date.now() });
+  return ids;
+}
+
 export async function detectSearchMode(client, teamId) {
   if (!teamId) return 'keyword';
   if (capabilityCache.has(teamId)) return capabilityCache.get(teamId);
@@ -82,7 +111,7 @@ export function normalizeRtsResult(res) {
 }
 
 export async function searchWorkspace(client, {
-  query, contentTypes = ['messages', 'files'], actionToken, contextChannelId, limit = 10,
+  query, contentTypes = ['messages', 'files'], actionToken, contextChannelId, limit = 10, teamId,
 }) {
   const params = {
     query,
@@ -108,5 +137,7 @@ export async function searchWorkspace(client, {
     console.error('[rts] search.context failed:', err);
     throw new Error(`Workspace search unavailable (${err}). Tell the user you couldn't search just now and offer to retry.`);
   }
-  return normalizeRtsResult(res);
+  const results = normalizeRtsResult(res);
+  const archived = await getArchivedChannelIds(client, teamId);
+  return archived.size ? results.filter((r) => !r.channel_id || !archived.has(r.channel_id)) : results;
 }

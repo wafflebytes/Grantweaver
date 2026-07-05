@@ -54,6 +54,21 @@ async function wipeDb(teamId) {
   console.log('DB wiped for', teamId);
 }
 
+// True 0-to-1 reset: deletes the ORG ROW ITSELF (not just its fields) so the
+// app has zero record of this team ever being set up — exactly the state a
+// real install into a brand-new workspace starts from. installations is
+// deliberately untouched: that's the OAuth/bot-token record, deleting it
+// would actually uninstall the app rather than simulate a fresh org.
+async function wipeOrgEntirely(teamId) {
+  await db.pool.query('DELETE FROM opp_activity WHERE team_id=$1', [teamId]);
+  await db.pool.query('DELETE FROM pending_intents WHERE team_id=$1', [teamId]);
+  await db.pool.query('DELETE FROM signals WHERE team_id=$1', [teamId]);
+  await db.pool.query('DELETE FROM feedback WHERE team_id=$1', [teamId]);
+  // opportunities/evidence_pointers/watches/evidence_index cascade automatically.
+  const { rowCount } = await db.pool.query('DELETE FROM orgs WHERE team_id=$1', [teamId]);
+  console.log(rowCount ? `org row deleted for ${teamId} — app now has zero record of this team` : `no org row found for ${teamId}`);
+}
+
 // chat.delete only works for the token that actually posted the message.
 // #general's persona messages were posted under several distinct bot
 // identities (one per persona's username override) — SEED_BOT_TOKEN only
@@ -114,6 +129,7 @@ const teamId = 'T0BESJ1MU7Q';
 if (step === 'archive') await archiveChannels();
 else if (step === 'lists') await deleteLists(teamId);
 else if (step === 'db') await wipeDb(teamId);
+else if (step === 'wipeorg') await wipeOrgEntirely(teamId);
 else if (step === 'dm') await cleanDms(teamId, process.argv[3]);
 else if (step === 'channel') await cleanChannel(process.argv[3]);
 else console.log('usage: node clean-slate.mjs <archive|lists|db|dm [userId]>');

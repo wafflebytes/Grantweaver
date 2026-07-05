@@ -172,7 +172,7 @@ export function buildToolbelt(ctx) {
       const mode = await detectSearchMode(client, teamId);
       const q = mode === 'keyword' ? expandKeywordQuery(query) : query;
       const rawResults = await searchWorkspace(client, {
-        query: q, contentTypes: content_types === 'both' ? ['messages', 'files'] : content_types, actionToken, contextChannelId,
+        query: q, contentTypes: content_types === 'both' ? ['messages', 'files'] : content_types, actionToken, contextChannelId, teamId,
       });
       // Onboarding lets the org pick which channels feed evidence
       // (watched_channels/post_channels) — but until now that scope was
@@ -352,7 +352,7 @@ export function buildToolbelt(ctx) {
         return null;
       });
       if (!summary) return { error: 'Rescan failed — Real-Time Search may be unavailable right now.' };
-      return { ok: true, ...summary, note: `Evidence index rebuilt: ${summary.totalHits} hit(s) across ${summary.channelsCovered} channel(s). Tell the user, and mention the /org web page shows the full breakdown.` };
+      return { ok: true, ...summary, note: `Evidence index rebuilt: ${summary.totalHits} hit(s) across ${summary.channelsCovered} channel(s). This is a SEARCH INDEX only — it does not add anything to the Evidence List, App Home, or org dashboard by itself; nothing else changes until the user explicitly saves a specific item as evidence. Tell the user the index is ready, mention the /org web page shows the full theme breakdown, and that they can now ask you to search for or save specific evidence.` };
     },
 
     async evidence_locker({ action, channel_id, message_ts, permalink, tag = 'story', is_file = false }) {

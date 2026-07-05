@@ -120,7 +120,7 @@ registerIntentExecutor('draft', async (client, intent) => {
     const query = notes || `${opp?.title ?? ''} outcomes evidence testimonial`.trim();
     const mode = await detectSearchMode(client, teamId);
     const results = await searchWorkspace(client, {
-      query: mode === 'keyword' ? expandKeywordQuery(query) : query, contentTypes: ['messages', 'files'],
+      query: mode === 'keyword' ? expandKeywordQuery(query) : query, contentTypes: ['messages', 'files'], teamId,
     }).catch(() => []);
     await streamer.task('Writing the draft');
     const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount: pinnedEvidence.length + results.length, contextChannelId: undefined });

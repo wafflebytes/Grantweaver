@@ -50,7 +50,7 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
     try {
       const searchQuery = mode === 'keyword' ? expandKeywordQuery(q.query) : q.query;
       const results = await searchWorkspace(client, {
-        query: searchQuery, contentTypes: q.content_types, actionToken, limit: 20,
+        query: searchQuery, contentTypes: q.content_types, actionToken, limit: 20, teamId,
       });
       const scoped = watched.size
         ? results.filter((r) => !r.channel_id || watched.has(r.channel_id))
