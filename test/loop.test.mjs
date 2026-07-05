@@ -17,7 +17,7 @@ describe('inferTitle', () => {
 describe('looksEvidenceShaped', () => {
   it('flags evidence and drafting questions', () => {
     expect(looksEvidenceShaped('What impact evidence do we have from the last 90 days?')).toBe(true);
-    expect(looksEvidenceShaped('Draft a letter of intent for our top pipeline opportunity.')).toBe(true);
+    expect(looksEvidenceShaped('Show me citations for our tutoring outcomes.')).toBe(true);
     expect(looksEvidenceShaped('How did mentee attendance change this spring?')).toBe(true);
   });
   it('does not flag unrelated questions', () => {

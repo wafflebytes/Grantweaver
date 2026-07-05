@@ -52,3 +52,21 @@ describe('safeDate (via addOpportunity)', () => {
     expect(captured[5]).toBeNull();
   });
 });
+
+describe('upsertOrg', () => {
+  it('persists selected learn-from and post channels from setup', async () => {
+    let captured;
+    db.pool.query = vi.fn(async (sql, params) => { captured = { sql, params }; return { rows: [] }; });
+    await db.upsertOrg('T1', {
+      org_name: 'Riverbend',
+      mission: 'Youth mentoring',
+      focus_areas: ['youth'],
+      watched_channels: ['C-program', 'C-stories'],
+      post_channels: ['C-grants'],
+    });
+    expect(captured.sql).toContain('watched_channels');
+    expect(captured.sql).toContain('post_channels');
+    expect(captured.params[9]).toEqual(['C-program', 'C-stories']);
+    expect(captured.params[10]).toEqual(['C-grants']);
+  });
+});

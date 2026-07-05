@@ -45,7 +45,7 @@ const OPENAI_TOOLS = TOOL_SCHEMAS.map((t) => ({
 // search_workspace ourselves, synchronously, before the first LLM call, while
 // the token is guaranteed freshest — then hand the model pre-fetched results
 // instead of making it spend its first turn deciding to ask for them.
-const EVIDENCE_INTENT = /\b(evidence|impact|attendance|gpa|grade|metric|story|stories|testimonial|workspace|mentee|mentees|outcome|outcomes|survey|beneficiar|program update|draft|loi|letter of intent|proposal|report|funder|grant report|cite|citation)\b/i;
+const EVIDENCE_INTENT = /\b(search|find|gather|show|look\s+for|pull|cite|summarize)\b.{0,80}\b(evidence|impact|attendance|gpa|grade|metric|metrics|story|stories|testimonial|testimonials|outcome|outcomes|survey|beneficiar|program update|citation|citations)\b|\b(evidence|impact|attendance|gpa|grade|metric|metrics|story|stories|testimonial|testimonials|outcome|outcomes|survey|program update|citation|citations)\b.{0,80}\b(search|find|gather|show|look\s+for|pull|cite|summarize)\b|\b(what|which)\b.{0,40}\b(evidence|impact|metrics|testimonials|outcomes|citations)\b.{0,40}\b(do we have|is there|are there)\b|\bhow\b.{0,40}\b(attendance|gpa|grades?|outcomes?|metrics?)\b.{0,40}\b(change|changed|improve|improved|increase|increased|decrease|decreased)\b/i;
 
 // "show me the evidence list" / "what's in the locker" are asking to read back
 // what's ALREADY saved (evidence_locker's list action) — not a request to go
@@ -78,7 +78,7 @@ export async function runAgentTurn(ctx) {
   // in parallel with the DB context lookups below — every sequential await
   // ahead of it (org/pipeline/evidence reads, Slack API round-trips) burns
   // into the action_token's ~45-135s TTL before the LLM even sees the turn.
-  const wantsEvidence = Boolean(ctx.actionToken && looksEvidenceShaped(ctx.userText));
+  const wantsEvidence = Boolean(ctx.actionToken && ctx.surface !== 'dm' && looksEvidenceShaped(ctx.userText));
   const prefetchPromise = wantsEvidence
     ? toolbelt.search_workspace({ query: ctx.userText }).catch((e) => {
         console.warn('[loop] evidence pre-fetch failed, leaving it to the model:', e?.message ?? e);

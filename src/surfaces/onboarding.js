@@ -6,6 +6,9 @@
 import { db } from '../services/db.js';
 import { publishHome } from './home.js';
 import { registerIntentExecutor } from '../agent/intents.js';
+import { runWorkspaceScan } from '../services/scan.js';
+import { syncEvidenceToList, listLink } from '../services/lists.js';
+import { makeThreadStreamer } from '../agent/streamer.js';
 
 const FOCUS = ['education', 'youth', 'health', 'environment', 'arts', 'housing',
   'food security', 'workforce', 'civil rights', 'community'];
@@ -107,7 +110,62 @@ async function postChannels(client, channel) {
 async function promptForScan(client, channel) {
   await client.chat.postMessage({
     channel,
-    text: "You're set! 🧶 One more step — reply here with anything (try \"scan my workspace\") and I'll run your first evidence scan and show you what's already provable.",
+    text: "You're set! 🧶 One more step — reply here with *scan my workspace* and I'll run your first evidence scan, save the pointers, and update Home.",
+  });
+}
+
+async function runOnboardingScan(client, { teamId, channel, threadTs, userId, actionToken }) {
+  // Real interactive loader, not a wall of permanent italic messages: post
+  // one kickoff message, then run every scan step as a task_update chunk on
+  // a single live stream anchored to THAT message's ts — same primitive the
+  // regular agent turns use (streamer.js). Also threads everything under it
+  // instead of flooding the top-level DM.
+  const kickoff = await client.chat.postMessage({ channel, text: COPY.scanning });
+  const threadTsForStream = threadTs ?? kickoff.ts;
+  const streamer = makeThreadStreamer({ client, channel, thread_ts: threadTsForStream, userId, teamId });
+  const summary = await runWorkspaceScan(client, teamId, {
+    task: (label) => streamer.task(label),
+  }, { actionToken });
+
+  let saved = 0;
+  const seen = new Set();
+  for (const p of summary.pointers ?? []) {
+    const key = `${p.channel_id}:${p.message_ts}:${p.permalink}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const { listItemId } = await db.saveEvidence(teamId, {
+        channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
+        tag: p.tag, is_file: p.is_file, saved_by: userId,
+      });
+      const channelInfo = p.channel_id && p.channel_id !== 'file'
+        ? await client.conversations.info({ channel: p.channel_id }).catch(() => null)
+        : null;
+      await syncEvidenceToList(client, teamId, {
+        channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
+        tag: p.tag, is_file: p.is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+      }).catch(() => {});
+      saved++;
+    } catch (e) {
+      console.warn('[onboarding-scan] evidence save skipped:', e?.message ?? e);
+    }
+  }
+
+  await db.setOnboardingState(teamId, null);
+  await publishHome(client, teamId, userId).catch(() => {});
+  const org = await db.getOrg(teamId);
+  const evidenceListUrl = org?.evidence_list_id ? await listLink(client, teamId, org.evidence_list_id).catch(() => null) : null;
+  const themes = (summary.themes ?? []).slice(0, 6).map((t) => `• *${t.theme}* — ${t.hits} hit${t.hits === 1 ? '' : 's'}`).join('\n');
+  await streamer.stop({
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn',
+        text: `✅ *Evidence scan complete.*\nSaved *${saved}* pointer${saved === 1 ? '' : 's'} from *${summary.channelsCovered}* channel${summary.channelsCovered === 1 ? '' : 's'}${summary.fileCount ? `, including *${summary.fileCount}* file-backed item${summary.fileCount === 1 ? '' : 's'}` : ''}.` } },
+      ...(themes ? [{ type: 'section', text: { type: 'mrkdwn', text: themes } }] : []),
+      { type: 'actions', elements: [
+        ...(evidenceListUrl ? [{ type: 'button', url: evidenceListUrl, text: { type: 'plain_text', text: 'Open Evidence List' } }] : []),
+        { type: 'button', action_id: 'home_refresh', text: { type: 'plain_text', text: 'Refresh Home' } },
+      ] },
+    ],
   });
 }
 
@@ -152,6 +210,7 @@ export function registerOnboarding(app) {
       digest_channel: v.digest.val.selected_conversation ?? null,
       memories_channel: v.memories.val.selected_conversation ?? null,
     });
+    await db.setOnboardingState(teamId, { step: 'scan_pending', answers: {}, started_by: body.user.id, started_at: new Date().toISOString() });
     await promptForScan(client, body.user.id);
     await publishHome(client, teamId, body.user.id);
   });
@@ -210,7 +269,7 @@ export function registerOnboarding(app) {
     const a = org?.onboarding_state?.answers ?? {};
     await db.setChannels(teamId, { watched: a.watched ?? [], post: a.post ?? [] });
 
-    await db.setOnboardingState(teamId, null);
+    await db.setOnboardingState(teamId, { step: 'scan_pending', answers: {}, started_by: body.user.id, started_at: new Date().toISOString() });
     await promptForScan(client, channel);
   });
 
@@ -246,6 +305,9 @@ export function registerOnboarding(app) {
  * is a free-text step (mission, org_name). Returns true if it took over. */
 export async function handleOnboardingAnswer(client, { teamId, channel, userId, text, org }) {
   const step = org?.onboarding_state?.step;
+  if (step === 'scan_pending') {
+    return false;
+  }
   if (step === 'mission') {
     await db.upsertOrg(teamId, { mission: text.trim() });
     if (org?.org_name) {
@@ -264,6 +326,16 @@ export async function handleOnboardingAnswer(client, { teamId, channel, userId, 
     return true;
   }
   return false;
+}
+
+export async function maybeHandleOnboardingScan(client, { teamId, channel, threadTs, userId, text, org, actionToken }) {
+  if (org?.onboarding_state?.step !== 'scan_pending') return false;
+  if (!/\b(scan|rescan|index|workspace)\b/i.test(text ?? '')) {
+    await client.chat.postMessage({ channel, ...(threadTs ? { thread_ts: threadTs } : {}), text: 'Reply with *scan my workspace* when you want me to build the evidence index.' });
+    return true;
+  }
+  await runOnboardingScan(client, { teamId, channel, threadTs, userId, actionToken });
+  return true;
 }
 
 export function setupModal(org) {

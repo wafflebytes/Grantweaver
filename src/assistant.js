@@ -5,7 +5,7 @@
 import { runAgentTurn } from './agent/loop.js';
 import { makeDmStreamer } from './agent/streamer.js';
 import { db } from './services/db.js';
-import { handleOnboardingAnswer } from './surfaces/onboarding.js';
+import { handleOnboardingAnswer, maybeHandleOnboardingScan } from './surfaces/onboarding.js';
 
 const LOADING = [
   'Searching your workspace threads…',
@@ -84,6 +84,10 @@ export function registerAssistant(app) {
       // entirely — zero LLM involvement, keeps the agent loop untouched.
       const teamId = message.team ?? context.teamId;
       const org = teamId ? await db.getOrg(teamId) : null;
+      const actionToken = message.action_token;
+      if (await maybeHandleOnboardingScan(client, {
+        teamId, channel, threadTs: message.thread_ts, userId: message.user, text: message.text ?? '', org, actionToken,
+      })) return;
       const onboardingStep = org?.onboarding_state?.step;
       if (onboardingStep === 'mission' || onboardingStep === 'org_name') {
         await handleOnboardingAnswer(client, { teamId, channel, userId: message.user, text: message.text ?? '', org });
@@ -98,7 +102,6 @@ export function registerAssistant(app) {
 
       // action_token for bot-token RTS calls — top-level on the message event
       // under agent_view (confirmed against a live sandbox message).
-      const actionToken = message.action_token;
       if (!actionToken) console.warn('[rts] no action_token on event — RTS bot calls may fail');
 
       const result = await runAgentTurn({

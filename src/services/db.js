@@ -34,7 +34,7 @@ export const db = {
   pool, // exposed for tests only
 
   async migrateIfNeeded() {
-    for (const f of ['001_init.sql', '002_phase2.sql']) {
+    for (const f of ['001_init.sql', '002_phase2.sql', '003_evidence_merge.sql', '004_greeted_users.sql', '005_memories_channel.sql', '006_evidence_list.sql']) {
       const sql = await fs.readFile(new URL(`../../migrations/${f}`, import.meta.url), 'utf8');
       await pool.query(sql); // each file is fully idempotent (IF NOT EXISTS)
     }
@@ -63,16 +63,19 @@ export const db = {
     const cur = (await this.getOrg(teamId)) ?? {};
     const n = { ...cur, ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) };
     await pool.query(
-      `INSERT INTO orgs (team_id, org_name, mission, focus_areas, state, org_size, digest_channel, evidence_emoji, memories_channel)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'thread'),$9)
+      `INSERT INTO orgs (team_id, org_name, mission, focus_areas, state, org_size, digest_channel, evidence_emoji, memories_channel, watched_channels, post_channels)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'thread'),$9,$10,$11)
        ON CONFLICT (team_id) DO UPDATE SET
          org_name=EXCLUDED.org_name, mission=EXCLUDED.mission, focus_areas=EXCLUDED.focus_areas,
          state=EXCLUDED.state, org_size=EXCLUDED.org_size,
          digest_channel=COALESCE(EXCLUDED.digest_channel, orgs.digest_channel),
          evidence_emoji=COALESCE(EXCLUDED.evidence_emoji, orgs.evidence_emoji),
-         memories_channel=COALESCE(EXCLUDED.memories_channel, orgs.memories_channel)`,
+         memories_channel=COALESCE(EXCLUDED.memories_channel, orgs.memories_channel),
+         watched_channels=COALESCE(EXCLUDED.watched_channels, orgs.watched_channels),
+         post_channels=COALESCE(EXCLUDED.post_channels, orgs.post_channels)`,
       [teamId, n.org_name ?? null, n.mission ?? null, n.focus_areas ?? [], n.state ?? null,
-       n.org_size ?? null, n.digest_channel ?? null, n.evidence_emoji ?? null, n.memories_channel ?? null]);
+       n.org_size ?? null, n.digest_channel ?? null, n.evidence_emoji ?? null, n.memories_channel ?? null,
+       n.watched_channels ?? null, n.post_channels ?? null]);
   },
 
   // ── opportunities ──────────────────────────────────────────────────
