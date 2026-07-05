@@ -196,7 +196,16 @@ export async function ensureEvidenceList(client, teamId) {
 export async function syncEvidenceToList(client, teamId, ptr) {
   try {
     const { listId, columns } = await ensureEvidenceList(client, teamId);
-    const summary = `${ptr.tag ?? 'story'} evidence${ptr.is_file ? ' (file)' : ''}`;
+    // ptr.label is safe metadata (a filename, never message content) —
+    // live-reported: every row showed a generic "story evidence (file)"
+    // with no way to tell WHICH file without opening the permalink. Prefer
+    // it when we have it; a message with no label still gets a channel-only
+    // description, never the message's actual text.
+    const summary = ptr.label
+      ? ptr.label
+      : ptr.is_file
+        ? `${ptr.tag ?? 'story'} evidence (file)`
+        : `${ptr.tag ?? 'story'} evidence${ptr.channel_name ? ` — message in #${ptr.channel_name}` : ' — message'}`;
     const fields = [
       { column_id: columns.summary, ...textCell(summary) },
       ...(columns.tag ? [{ column_id: columns.tag, select: [ptr.tag ?? 'story'] }] : []),

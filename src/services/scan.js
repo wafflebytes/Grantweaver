@@ -11,9 +11,16 @@ const FIXED_PROBES = [
   { label: 'testimonial or thank-you from a parent, teacher, or partner', query: 'testimonial or thank-you from a parent, teacher, or partner', content_types: ['messages', 'files'] },
   { label: 'photos or documents from recent program events', query: 'photos or documents from recent program events', content_types: ['messages', 'files'] },
   { label: 'budget or funding discussions', query: 'budget or funding discussions', content_types: 'messages' },
+  // The other probes all skew toward file-backed hits (attendance sheets,
+  // flyers) — live-reported: a scan can come back almost entirely
+  // file-evidence with plain-text program updates undercounted. This one is
+  // messages-only and deliberately broad so a genuine text update ("we hit
+  // 40 mentees this term", "the after-school program wrapped strong") gets
+  // picked up even when it doesn't match a narrower probe's wording.
+  { label: 'program updates, milestones, or results shared as plain text', query: 'program updates, milestones, or results shared as a plain text message', content_types: 'messages' },
 ];
 
-/** Deterministic — same org profile always yields the same ≤8 queries, in the same order. */
+/** Deterministic — same org profile always yields the same ≤9 queries, in the same order. */
 export function scanQueries(org) {
   const focusAreas = (org?.focus_areas ?? []).slice(0, 4);
   const focusQueries = focusAreas.map((f) => ({
@@ -21,7 +28,10 @@ export function scanQueries(org) {
     query: `What results, numbers, or stories show our ${f} work is working?`,
     content_types: ['messages', 'files'],
   }));
-  return [...focusQueries, ...FIXED_PROBES].slice(0, 8);
+  // Cap raised from 8 to 9 alongside the 5th FIXED_PROBE (plain-text
+  // program updates) — with 4 focus areas the old cap silently dropped
+  // whichever fixed probe landed last, which would have been this one.
+  return [...focusQueries, ...FIXED_PROBES].slice(0, 9);
 }
 
 function heuristicStrength(hits) {
@@ -99,6 +109,7 @@ async function collectChannelEvidence(client, channelId, limit = 200) {
           permalink: fileLink,
           snippet: `${f.title ?? f.name ?? 'file'} ${m.text ?? ''}`.slice(0, 400),
           is_file: true,
+          label: f.title || f.name || null,
         });
       }
     }
@@ -108,7 +119,7 @@ async function collectChannelEvidence(client, channelId, limit = 200) {
 }
 
 /**
- * Runs the ≤8 scan queries against RTS, ≥6.5s apart (RTS rate-limit budget),
+ * Runs the ≤9 scan queries against RTS, ≥6.5s apart (RTS rate-limit budget),
  * classifies the transient results into funder-recognizable themes with ONE
  * LLM call, and persists ONLY the index (theme/channel/strength/count/links).
  * Never throws — a classifier failure degrades to a heuristic grouping
@@ -145,6 +156,11 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
         collected.push({
           query_label: q.label, channel_id: r.channel_id || '', channel_name: r.channel_name || null,
           message_ts: r.message_ts || '', permalink: r.permalink, snippet: r.snippet, is_file: r.kind === 'file',
+          // For files, RTS's `author` field is actually the file's title
+          // (rts.js) — safe, non-content metadata (a filename, not message
+          // text) worth surfacing as the List's display label instead of a
+          // generic "story evidence" row every file collapses into.
+          label: r.kind === 'file' ? (r.author || null) : null,
         });
       }
     } catch (e) {
@@ -209,7 +225,7 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
     fileCount: deduped.filter((c) => c.is_file).length,
     pointers: deduped.map((c) => ({
       channel_id: c.channel_id, message_ts: c.message_ts, permalink: c.permalink,
-      is_file: c.is_file, tag: scanTag(c.query_label),
+      is_file: c.is_file, tag: scanTag(c.query_label), label: c.label ?? null,
     })),
   };
 }

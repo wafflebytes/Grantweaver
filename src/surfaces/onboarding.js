@@ -149,6 +149,7 @@ async function runOnboardingScan(client, { teamId, channel, threadTs, userId, ac
       await syncEvidenceToList(client, teamId, {
         channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
         tag: p.tag, is_file: p.is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+        label: p.label,
       }).catch(() => {});
       saved++;
     } catch (e) {
