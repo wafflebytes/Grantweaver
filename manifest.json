@@ -122,6 +122,7 @@
       "bot_events": [
         "message.im",
         "app_home_opened",
+        "app_context_changed",
         "reaction_added",
         "app_mention",
         "link_shared",

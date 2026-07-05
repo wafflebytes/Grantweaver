@@ -71,3 +71,25 @@ export async function completeOnce(messages, { maxTokens = MAX_TOKENS, temperatu
   }
   return response.choices[0].message.content ?? '';
 }
+
+// completeOnce's own worst case (2 truncation attempts x withRetry's 2
+// attempts x 120s timeout) is ~8 minutes on a single call — fine for the
+// main tool-calling loop (no fallback exists there), but classifiers
+// (classifyThemes, assessFitBatch, extractChecklist) are all explicitly
+// "never throws, degrade to a heuristic" by design, so there's no reason
+// one slow/stuck LLM call should block the caller anywhere near that long.
+// Live-caught: a stuck classifyThemes call during the onboarding scan left
+// a Slack live stream open with no updates for 6-8+ minutes, which Slack's
+// client eventually surfaced as an errored/expired stream — the fallback
+// path existed, it just never got a chance to run in time. Race a hard
+// deadline against the real call; the loser is abandoned (its eventual
+// result/rejection is swallowed), never awaited by the caller.
+export async function completeWithDeadline(fn, ms) {
+  let timer;
+  const timedOut = new Promise((resolve) => { timer = setTimeout(() => resolve(undefined), ms); });
+  try {
+    return await Promise.race([fn().catch((e) => { console.warn('[llm] deadline race: call failed —', e?.message ?? e); return undefined; }), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 let nextResponse = '';
 vi.mock('../src/agent/llm.js', () => ({
   completeOnce: vi.fn(async () => nextResponse),
+  completeWithDeadline: vi.fn((fn) => fn()),
 }));
 
 const { assessFitBatch, extractChecklist } = await import('../src/prompts/classifiers.js');

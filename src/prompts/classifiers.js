@@ -1,7 +1,14 @@
 // One-shot JSON classifiers — always temperature 0, always survive malformed
 // output (a bad LLM response degrades the
 // feature, never blocks the turn).
-import { completeOnce } from '../agent/llm.js';
+import { completeOnce, completeWithDeadline } from '../agent/llm.js';
+
+// These classifiers are all explicitly "never throws, degrade to a
+// heuristic" — a slow LLM call must never block the caller anywhere near
+// completeOnce's ~8min theoretical worst case (see llm.js). 25s comfortably
+// covers a real completion on a healthy backend while still leaving a
+// live-streamed turn's timeline feeling responsive.
+const CLASSIFIER_DEADLINE_MS = 25_000;
 
 function truncate(s, n) { return (s ?? '').slice(0, n); }
 
@@ -181,7 +188,8 @@ function parseJsonArray(text) {
  */
 async function completeWithReasoningHeadroom(messages, temperature) {
   for (const maxTokens of [8000, 14000]) {
-    const text = await completeOnce(messages, { temperature, maxTokens });
+    const text = await completeWithDeadline(() => completeOnce(messages, { temperature, maxTokens }), CLASSIFIER_DEADLINE_MS);
+    if (text === undefined) { console.warn('[llm] classifier call missed its deadline — falling back'); return null; }
     const parsed = parseJsonArray(text);
     if (parsed) return parsed;
   }

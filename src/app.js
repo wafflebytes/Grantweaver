@@ -10,6 +10,7 @@ import { registerMention } from './surfaces/mention.js';
 import { registerUnfurl } from './surfaces/unfurl.js';
 import { registerShortcuts } from './surfaces/shortcuts.js';
 import { registerProactive } from './surfaces/proactive.js';
+import { registerContext } from './surfaces/context.js';
 import { startScheduler } from './services/scheduler.js';
 import { db } from './services/db.js';
 import { handleMcpRequest } from './mcp/grantweaver-server.mjs';
@@ -107,6 +108,7 @@ registerMention(app);
 registerUnfurl(app);
 registerShortcuts(app);
 registerProactive(app);
+registerContext(app);
 
 app.error(async (error) => {
   // Never crash on a handler error; never leak stack traces to users.

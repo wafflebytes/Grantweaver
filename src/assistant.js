@@ -6,6 +6,7 @@ import { runAgentTurn } from './agent/loop.js';
 import { makeDmStreamer } from './agent/streamer.js';
 import { db } from './services/db.js';
 import { handleOnboardingAnswer, maybeHandleOnboardingScan } from './surfaces/onboarding.js';
+import { resolveActiveContext } from './surfaces/context.js';
 
 const LOADING = [
   'Searching your workspace threads…',
@@ -31,7 +32,7 @@ const DEFAULT_PROMPTS = [
 const ACTIVE_DRAFT_EXTRA = { title: 'What changed in my drafts?', message: 'What changed in my drafts?' };
 const DEADLINE_WEEK_EXTRA = { title: "What's due this week?", message: "What's due this week?" };
 
-export function buildSuggestedPrompts({ org, pipeline = [] }) {
+export function buildSuggestedPrompts({ org, pipeline = [], activeContext = null }) {
   if (!org?.mission) return NO_ORG_PROMPTS;
   const hasActiveDraft = pipeline.some((o) => o.stage === 'drafting');
   const deadlineThisWeek = pipeline.some((o) => {
@@ -42,6 +43,9 @@ export function buildSuggestedPrompts({ org, pipeline = [] }) {
   let prompts = [...DEFAULT_PROMPTS];
   if (deadlineThisWeek) prompts = [DEADLINE_WEEK_EXTRA, ...prompts.filter((p) => p.title !== "What's due soon?")];
   if (hasActiveDraft) prompts = [...prompts.filter((p) => p.title !== 'Draft an LOI'), ACTIVE_DRAFT_EXTRA];
+  if (activeContext?.contextChannelId) {
+    prompts = [{ title: 'Use current channel', message: 'Find grant evidence related to the channel I have open.' }, ...prompts];
+  }
   return prompts.slice(0, 4);
 }
 
@@ -51,10 +55,13 @@ export function registerAssistant(app) {
     try {
       const org = context.teamId ? await db.getOrg(context.teamId) : null;
       const pipeline = context.teamId ? await db.listOpportunities(context.teamId) : [];
+      const activeContext = context.teamId && event.user
+        ? await resolveActiveContext({ teamId: context.teamId, userId: event.user, eventContext: event.app_context ? event : null })
+        : null;
       await client.assistant.threads.setSuggestedPrompts({
         channel_id: event.channel,
         title: 'How can I help today?',
-        prompts: buildSuggestedPrompts({ org, pipeline }),
+        prompts: buildSuggestedPrompts({ org, pipeline, activeContext }),
       });
 
       // Persisted, not an in-process Set — a Set gets wiped on every
@@ -85,6 +92,10 @@ export function registerAssistant(app) {
       const teamId = message.team ?? context.teamId;
       const org = teamId ? await db.getOrg(teamId) : null;
       const actionToken = message.action_token;
+      const activeContext = await resolveActiveContext({
+        teamId, userId: message.user,
+        eventContext: message.app_context ? { app_context: message.app_context } : null,
+      });
       if (await maybeHandleOnboardingScan(client, {
         teamId, channel, threadTs: message.thread_ts, userId: message.user, text: message.text ?? '', org, actionToken,
       })) return;
@@ -111,13 +122,21 @@ export function registerAssistant(app) {
         userId: message.user,
         channelId: channel,
         threadTs: undefined,
-        contextChannelId: undefined,
+        contextChannelId: activeContext.contextChannelId,
+        activeContext,
         actionToken,
         messageTs: message.ts,
         botUserId: context.botUserId,
         userText: message.text ?? '',
         makeStreamer: () => makeDmStreamer({ sayStream, setStatus }),
       });
+
+      if (result?.title) {
+        await client.assistant.threads.setTitle({
+          channel_id: channel,
+          title: result.title,
+        }).catch((e) => console.warn('[setTitle]', e?.data?.error ?? e.message));
+      }
 
       console.log(`[turn] ${Date.now() - t0}ms tools=${result?.toolCalls ?? 0}`);
     } catch (e) {

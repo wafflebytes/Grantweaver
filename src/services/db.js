@@ -30,11 +30,31 @@ function safeDate(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+const FORBIDDEN_CONTENT_KEYS = ['text', 'snippet', 'content', 'message', 'file_content', 'raw'];
+
+function assertNoForbiddenKeys(value, path = 'value') {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => assertNoForbiddenKeys(v, `${path}[${i}]`));
+    return;
+  }
+  for (const [k, v] of Object.entries(value)) {
+    if (FORBIDDEN_CONTENT_KEYS.includes(k)) {
+      throw new Error(`COMPLIANCE VIOLATION: ${path} may not contain "${k}"`);
+    }
+    assertNoForbiddenKeys(v, `${path}.${k}`);
+  }
+}
+
+function json(v, fallback) {
+  return JSON.stringify(v ?? fallback);
+}
+
 export const db = {
   pool, // exposed for tests only
 
   async migrateIfNeeded() {
-    for (const f of ['001_init.sql', '002_phase2.sql', '003_evidence_merge.sql', '004_greeted_users.sql', '005_memories_channel.sql', '006_evidence_list.sql']) {
+    for (const f of ['001_init.sql', '002_phase2.sql', '003_evidence_merge.sql', '004_greeted_users.sql', '005_memories_channel.sql', '006_evidence_list.sql', '007_agent_context_state.sql', '008_governance_settings.sql', '009_agent_observability.sql']) {
       const sql = await fs.readFile(new URL(`../../migrations/${f}`, import.meta.url), 'utf8');
       await pool.query(sql); // each file is fully idempotent (IF NOT EXISTS)
     }
@@ -193,11 +213,78 @@ export const db = {
     await pool.query('DELETE FROM orgs WHERE team_id=$1', [teamId]);
   },
 
-  // ── activity / signals ─────────────────────────────────────────────
-  async logActivity(teamId, oppId, { actor, kind, summary }) {
+  // ── active context / agent state ───────────────────────────────────
+  async upsertActiveContext(teamId, userId, context = {}) {
+    const ctx = context?.context ?? context ?? {};
+    const entities = context?.entities ?? ctx?.entities ?? [];
+    assertNoForbiddenKeys(ctx, 'active_context.context');
+    assertNoForbiddenKeys(entities, 'active_context.entities');
     await pool.query(
-      'INSERT INTO opp_activity (team_id, opp_id, actor, kind, summary) VALUES ($1,$2,$3,$4,$5)',
-      [teamId, String(oppId), actor ?? 'agent', kind, summary]);
+      `INSERT INTO active_contexts (team_id, user_id, context, entities, updated_at)
+       VALUES ($1,$2,$3,$4,now())
+       ON CONFLICT (team_id, user_id) DO UPDATE SET
+         context=EXCLUDED.context, entities=EXCLUDED.entities, updated_at=now()`,
+      [teamId, userId, json(ctx, {}), json(entities, [])]);
+  },
+  async getActiveContext(teamId, userId) {
+    const { rows } = await pool.query('SELECT * FROM active_contexts WHERE team_id=$1 AND user_id=$2', [teamId, userId]);
+    return rows[0] ?? null;
+  },
+  async clearActiveContext(teamId, userId) {
+    await this.upsertActiveContext(teamId, userId, { context: {}, entities: [] });
+  },
+  async getAgentState(teamId, channelId, threadTs = '') {
+    const { rows } = await pool.query(
+      'SELECT * FROM agent_thread_state WHERE team_id=$1 AND channel_id=$2 AND thread_ts=$3',
+      [teamId, channelId, threadTs ?? '']);
+    return rows[0] ?? null;
+  },
+  async upsertAgentState(teamId, channelId, threadTs = '', patch = {}) {
+    assertNoForbiddenKeys(patch.sources, 'agent_state.sources');
+    assertNoForbiddenKeys(patch.artifacts, 'agent_state.artifacts');
+    const cur = await this.getAgentState(teamId, channelId, threadTs ?? '');
+    const n = { ...(cur ?? {}), ...patch };
+    await pool.query(
+      `INSERT INTO agent_thread_state
+        (team_id, surface, user_id, channel_id, thread_ts, goal, constraints, decisions, artifacts, sources, summary, last_user_message_ts, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+       ON CONFLICT (team_id, channel_id, thread_ts) DO UPDATE SET
+         surface=EXCLUDED.surface, user_id=EXCLUDED.user_id, goal=EXCLUDED.goal,
+         constraints=EXCLUDED.constraints, decisions=EXCLUDED.decisions,
+         artifacts=EXCLUDED.artifacts, sources=EXCLUDED.sources, summary=EXCLUDED.summary,
+         last_user_message_ts=EXCLUDED.last_user_message_ts, updated_at=now()`,
+      [teamId, n.surface ?? 'dm', n.user_id ?? n.userId ?? null, channelId, threadTs ?? '',
+       n.goal ?? null, json(n.constraints, {}), json(n.decisions, []), json(n.artifacts, []),
+       json(n.sources, []), n.summary ?? null, n.last_user_message_ts ?? null]);
+  },
+  async mergeAgentState(teamId, channelId, threadTs = '', patch = {}) {
+    const cur = await this.getAgentState(teamId, channelId, threadTs ?? '');
+    const merged = {
+      surface: patch.surface ?? cur?.surface ?? 'dm',
+      user_id: patch.user_id ?? patch.userId ?? cur?.user_id ?? null,
+      goal: patch.goal ?? cur?.goal ?? null,
+      constraints: { ...(cur?.constraints ?? {}), ...(patch.constraints ?? {}) },
+      decisions: dedupeJson([...(cur?.decisions ?? []), ...(patch.decisions ?? [])], 'summary').slice(-20),
+      artifacts: dedupeJson([...(cur?.artifacts ?? []), ...(patch.artifacts ?? [])], 'id').slice(-20),
+      sources: dedupeJson([...(cur?.sources ?? []), ...(patch.sources ?? [])], 'permalink').slice(-30),
+      summary: patch.summary ?? cur?.summary ?? null,
+      last_user_message_ts: patch.last_user_message_ts ?? cur?.last_user_message_ts ?? null,
+    };
+    await this.upsertAgentState(teamId, channelId, threadTs ?? '', merged);
+    return this.getAgentState(teamId, channelId, threadTs ?? '');
+  },
+  async listAgentStates(teamId, limit = 10) {
+    const { rows } = await pool.query(
+      'SELECT * FROM agent_thread_state WHERE team_id=$1 ORDER BY updated_at DESC LIMIT $2',
+      [teamId, limit]);
+    return rows;
+  },
+
+  // ── activity / signals ─────────────────────────────────────────────
+  async logActivity(teamId, oppId, { actor, kind, summary, metadata }) {
+    await pool.query(
+      'INSERT INTO opp_activity (team_id, opp_id, actor, kind, summary, metadata) VALUES ($1,$2,$3,$4,$5,$6)',
+      [teamId, String(oppId), actor ?? 'agent', kind, summary, json(metadata, {})]);
   },
   async listActivity(teamId, oppId, limit = 10) {
     const { rows } = await pool.query(
@@ -221,6 +308,64 @@ export const db = {
     await pool.query(
       'INSERT INTO signals (team_id, kind, subject, detail) VALUES ($1,$2,$3,$4)',
       [teamId, kind, subject, detail ?? null]);
+  },
+
+  // ── observability / governance ─────────────────────────────────────
+  async startAgentRun(run) {
+    const { rows } = await pool.query(
+      `INSERT INTO agent_runs (team_id, user_id, channel_id, thread_ts, surface, agent_id, request_message_ts, model)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [run.teamId ?? null, run.userId ?? null, run.channelId ?? null, run.threadTs ?? '',
+       run.surface, run.agentId, run.requestMessageTs ?? null, run.model ?? null]);
+    return rows[0];
+  },
+  async finishAgentRun(runId, patch = {}) {
+    await pool.query(
+      `UPDATE agent_runs SET status=COALESCE($2,status), total_latency_ms=$3, tools_called=$4,
+         retry_attempts=$5, input_tokens=$6, output_tokens=$7, total_tokens=$8,
+         estimated_cost_usd=$9, token_efficiency=$10, error_type=$11, error_message=$12,
+         channels_accessed=$13, artifacts=$14, finished_at=now()
+       WHERE id=$1`,
+      [runId, patch.status ?? null, patch.total_latency_ms ?? null, json(patch.tools_called, []),
+       patch.retry_attempts ?? 0, patch.input_tokens ?? null, patch.output_tokens ?? null,
+       patch.total_tokens ?? null, patch.estimated_cost_usd ?? null, patch.token_efficiency ?? null,
+       patch.error_type ?? null, patch.error_message ?? null, json(patch.channels_accessed, []),
+       json(patch.artifacts, [])]);
+  },
+  async requestRunCancel(runId) {
+    await pool.query("UPDATE agent_runs SET cancel_requested_at=now(), status='cancelled' WHERE id=$1", [runId]);
+  },
+  async logAuditEvent(event) {
+    assertNoForbiddenKeys(event.metadata, 'audit.metadata');
+    await pool.query(
+      `INSERT INTO agent_audit_events (team_id, user_id, run_id, event_type, subject_type, subject_id, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [event.teamId ?? null, event.userId ?? null, event.runId ?? null, event.eventType,
+       event.subjectType ?? null, event.subjectId ?? null, json(event.metadata, {})]);
+  },
+  async listAgentRuns(teamId, limit = 10) {
+    const { rows } = await pool.query('SELECT * FROM agent_runs WHERE team_id=$1 ORDER BY started_at DESC LIMIT $2', [teamId, limit]);
+    return rows;
+  },
+  async listAuditEvents(teamId, limit = 10) {
+    const { rows } = await pool.query('SELECT * FROM agent_audit_events WHERE team_id=$1 ORDER BY created_at DESC LIMIT $2', [teamId, limit]);
+    return rows;
+  },
+  async setGovernanceSettings(teamId, settings = {}) {
+    await pool.query(
+      `UPDATE orgs SET governance_settings=$2, proactive_enabled=$3, ai_excluded_channels=$4 WHERE team_id=$1`,
+      [teamId, json(settings.governance_settings ?? settings, {}), settings.proactive_enabled ?? true, settings.ai_excluded_channels ?? []]);
+  },
+  async getGovernanceSettings(teamId) {
+    const org = await this.getOrg(teamId);
+    return {
+      ai_excluded_channels: org?.ai_excluded_channels ?? [],
+      proactive_enabled: org?.proactive_enabled ?? true,
+      governance_settings: org?.governance_settings ?? {},
+    };
+  },
+  async setAiExcludedChannels(teamId, channelIds = []) {
+    await pool.query('UPDATE orgs SET ai_excluded_channels=$2 WHERE team_id=$1', [teamId, channelIds]);
   },
   async countSignalsSince(teamId, kind, subject, hours) {
     const { rows } = await pool.query(
@@ -448,3 +593,15 @@ export const db = {
     };
   },
 };
+
+function dedupeJson(items, key) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items.filter(Boolean)) {
+    const id = item?.[key] ?? JSON.stringify(item);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(item);
+  }
+  return out;
+}
