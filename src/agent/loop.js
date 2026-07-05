@@ -79,6 +79,15 @@ export async function runAgentTurn(ctx) {
     return null;
   });
   ctx.runTracker = tracker;
+  // Defined before buildToolbelt so tools that do their own multi-step work
+  // (rescan_workspace) can render real progress through the SAME stream
+  // this turn already opens, instead of being stuck with a hardcoded noop —
+  // live-reported: "rescan my workspace" mid-conversation showed none of
+  // the onboarding scan's per-query progress, just the loop's single
+  // generic "rescan_workspace" status line.
+  let streamer;
+  const getStreamer = () => (streamer ??= ctx.makeStreamer());
+  ctx.getStreamer = getStreamer;
   const toolbelt = buildToolbelt(ctx);
 
   // Pre-classification fast path: fire the RTS call FIRST,
@@ -135,9 +144,6 @@ export async function runAgentTurn(ctx) {
     ...history,
     { role: 'user', content: ctx.userText },
   ];
-
-  let streamer;
-  const getStreamer = () => (streamer ??= ctx.makeStreamer());
 
   let toolCalls = 0;
   const toolNames = [];

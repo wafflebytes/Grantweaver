@@ -357,8 +357,19 @@ export function buildToolbelt(ctx) {
 
     async rescan_workspace() {
       if (!teamId) return { error: 'No team context' };
-      const noopStreamer = { task: async () => {} };
-      const summary = await runWorkspaceScan(client, teamId, noopStreamer, { actionToken }).catch((e) => {
+      // Route through the turn's real stream when one exists (channel/
+      // thread surfaces get makeThreadStreamer — a real task_update
+      // checklist; DM surfaces get makeDmStreamer, which can only relay
+      // this as native setStatus text, a Slack platform limit, not a bug
+      // here) instead of a hardcoded noop that showed zero progress beyond
+      // the loop's own single generic "rescan_workspace" status line.
+      // Collapse every step into one updating line, same as onboarding's scan.
+      let scanTaskId;
+      const realStreamer = ctx.getStreamer?.();
+      const scanStreamer = realStreamer
+        ? { task: async (label) => { scanTaskId = await realStreamer.task(label, 'in_progress', scanTaskId); } }
+        : { task: async () => {} };
+      const summary = await runWorkspaceScan(client, teamId, scanStreamer, { actionToken }).catch((e) => {
         console.error('[rescan_workspace]', e?.message ?? e);
         return null;
       });
