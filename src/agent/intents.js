@@ -113,7 +113,7 @@ registerIntentExecutor('draft', async (client, intent) => {
       grantsGov.fetchOpportunity(opp_id).catch(() => null),
     ]);
     title = `Letter of Intent — ${opp?.title ?? oppDetails?.title ?? opp_id}`;
-    await streamer.task('Searching your workspace for evidence');
+    const searchTaskId = await streamer.task('Searching your workspace for evidence');
     // Change-scope pinned evidence: exact pointers the user picked — re-read
     // live by ts, used alongside (and listed ahead of) the fresh search.
     const pinnedEvidence = (await Promise.all((pinned ?? []).map((p) => rereadPinned(client, p)))).filter(Boolean);
@@ -122,7 +122,8 @@ registerIntentExecutor('draft', async (client, intent) => {
     const results = await searchWorkspace(client, {
       query: mode === 'keyword' ? expandKeywordQuery(query) : query, contentTypes: ['messages', 'files'], teamId,
     }).catch(() => []);
-    await streamer.task('Writing the draft');
+    await streamer.task('Searched your workspace for evidence', 'completed', searchTaskId);
+    const draftTaskId = await streamer.task('Writing the draft');
     const system = SYSTEM_PROMPT + renderOrgContext({ org, pipeline, evidenceCount: pinnedEvidence.length + results.length, contextChannelId: undefined });
     const userMsg = [
       `Draft the Letter of Intent for this opportunity now — you already have everything you need, do not ask questions.`,
@@ -137,6 +138,7 @@ registerIntentExecutor('draft', async (client, intent) => {
       { role: 'system', content: system },
       { role: 'user', content: userMsg },
     ], { maxTokens: 3000 });
+    await streamer.task('Wrote the draft', 'completed', draftTaskId);
   }
 
   const citations = [...markdown.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]*archives[^)]*)\)/g)];

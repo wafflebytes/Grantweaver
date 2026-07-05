@@ -68,12 +68,13 @@ registerIntentExecutor('revise', async (client, intent) => {
   // two separate permanent chat messages instead of updating in place).
   const streamer = makeThreadStreamer({ client, channel: intent.channel_id, thread_ts: intent.message_ts, userId: intent.requested_by, teamId });
 
-  await streamer.task('Reading the thread');
+  const readTaskId = await streamer.task('Reading the thread');
   const { messages = [] } = await client.conversations.replies({ channel: thread_channel, ts: thread_ts, limit: 50 });
   const requests = messages
     .filter((m) => !m.subtype && m.text)
     .map((m) => `<@${m.user}>: ${m.text}`)
     .join('\n');
+  await streamer.task('Read the thread', 'completed', readTaskId);
 
   // Branch B: no live read-back of the current Draft section —
   // we ask the model to revise from the LAST version we ourselves wrote,
@@ -83,11 +84,12 @@ registerIntentExecutor('revise', async (client, intent) => {
   const lastKnownDraft = recallDraft(teamId, opp_id)
     ?? '_(no cached copy of the current draft — treat the change requests as instructions for a fresh rewrite of the Draft section.)_';
 
-  await streamer.task('Weaving in the changes');
+  const weaveTaskId = await streamer.task('Weaving in the changes');
   const text = await completeOnce([
     { role: 'user', content: revisePrompt({ current: lastKnownDraft, requests }) },
   ], { maxTokens: 4000 });
   const { draft, diff } = parseRevision(text);
+  await streamer.task('Wove in the changes', 'completed', weaveTaskId);
 
   await db.setCanvasWritten(teamId, opp_id);
   await db.logActivity(teamId, opp_id, { actor: intent.requested_by, kind: 'revision', summary: 'Draft revised from thread requests' });
