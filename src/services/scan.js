@@ -58,7 +58,7 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
       for (const r of scoped) {
         collected.push({
           query_label: q.label, channel_id: r.channel_id || '', channel_name: r.channel_name || null,
-          permalink: r.permalink, snippet: r.snippet, is_file: r.kind === 'file',
+          message_ts: r.message_ts || '', permalink: r.permalink, snippet: r.snippet, is_file: r.kind === 'file',
         });
       }
     } catch (e) {
@@ -115,5 +115,16 @@ export async function runWorkspaceScan(client, teamId, streamer, { actionToken }
     totalHits: deduped.length,
     channelsCovered: new Set(deduped.map((c) => c.channel_id)).size,
     fileCount: deduped.filter((c) => c.is_file).length,
+    pointers: deduped.map((c) => ({
+      channel_id: c.channel_id, message_ts: c.message_ts, permalink: c.permalink,
+      is_file: c.is_file, tag: scanTag(c.query_label),
+    })),
   };
+}
+
+function scanTag(label) {
+  const l = label.toLowerCase();
+  if (l.includes('testimonial') || l.includes('thank-you')) return 'testimonial';
+  if (l.includes('metric') || l.includes('attendance') || l.includes('budget') || l.includes('funding')) return 'metric';
+  return 'story';
 }

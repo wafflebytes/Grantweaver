@@ -239,6 +239,47 @@ export async function listLink(client, teamId, listId) {
   }
 }
 
+// Pulls the Evidence Locker List into DB truth: a row a human deleted in
+// Slack disappears from the DB pointer table (and therefore App Home/org
+// dashboard) too, so deleting in the List is a real delete, not a ghost
+// row. A row a human adds by hand (pasting a permalink into the Link
+// column) gets adopted as a real evidence pointer the same way. Best-effort
+// throughout — a Lists outage must never break a turn.
+const reconcilingEvidence = new Set();
+export async function reconcileEvidenceListEdits(client, teamId) {
+  if (reconcilingEvidence.has(teamId)) return;
+  reconcilingEvidence.add(teamId);
+  try {
+    const org = await db.getOrg(teamId);
+    if (!org?.evidence_list_id) return;
+    const columns = org.evidence_list_columns;
+    const { items = [] } = await client.apiCall('slackLists.items.list', { list_id: org.evidence_list_id });
+    const pointers = await db.listEvidence(teamId, 500);
+    const liveIds = new Set(items.map((i) => i.id));
+    for (const ptr of pointers) {
+      if (ptr.list_item_id && !liveIds.has(ptr.list_item_id)) {
+        await db.deleteEvidenceByListItem(teamId, ptr.list_item_id);
+      }
+    }
+    for (const row of items) {
+      if (pointers.some((p) => p.list_item_id === row.id)) continue; // already tracked
+      const permalink = cellValue(row, columns.link);
+      if (!permalink) continue; // nothing to adopt without a link back to the source message
+      const m = permalink.match(/\/archives\/([A-Z0-9]+)\/p(\d+)/);
+      if (!m) continue;
+      const [, channel_id, tsRaw] = m;
+      const message_ts = `${tsRaw.slice(0, -6)}.${tsRaw.slice(-6)}`;
+      const tag = cellValue(row, columns.tag) ?? 'story';
+      const { listItemId } = await db.saveEvidence(teamId, { channel_id, message_ts, permalink, tag, saved_by: null });
+      if (!listItemId) await db.setEvidenceListItem(teamId, channel_id, message_ts, row.id);
+    }
+  } catch (e) {
+    console.warn('[lists] evidence reconcile skipped:', e?.data?.error ?? e?.message);
+  } finally {
+    reconcilingEvidence.delete(teamId);
+  }
+}
+
 function omitColumnId({ column_id, ...rest }) {
   return rest;
 }

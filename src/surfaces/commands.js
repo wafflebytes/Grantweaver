@@ -6,7 +6,7 @@ import { orgLinkUrl } from '../services/weblink.js';
 import { runWatchSweep } from '../services/watches.js';
 import { runHarvestSimulate, runUpdateRequestSweep, runReviewingStaleSweep } from './proactive.js';
 import { runDeadlineSweepOnce } from '../services/scheduler.js';
-import { reconcileListEdits } from '../services/lists.js';
+import { reconcileListEdits, reconcileEvidenceListEdits } from '../services/lists.js';
 import { postMemoriesRecap } from '../services/memories.js';
 
 function simulateAllowed(userId) {
@@ -116,7 +116,8 @@ export function registerCommands(app) {
         // right after editing the List by hand, to confirm two-way sync live
         // instead of waiting up to an hour.
         await reconcileListEdits(client, command.team_id);
-        return respond({ response_type: 'ephemeral', text: '🧶 Reconciled the pipeline List against any manual edits.' });
+        await reconcileEvidenceListEdits(client, command.team_id);
+        return respond({ response_type: 'ephemeral', text: '🧶 Reconciled the pipeline and evidence Lists against any manual edits.' });
       }
       return respond({ response_type: 'ephemeral', text: 'Usage: `/grantweaver simulate <match-drop|harvest|update-request|reviewing-stale|deadline|digest|memories|sync-list>`' });
     }

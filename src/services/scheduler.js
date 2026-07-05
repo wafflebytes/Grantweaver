@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { db } from './db.js';
 import { postDigestNow } from './digest.js';
-import { reconcileListEdits } from './lists.js';
+import { reconcileListEdits, reconcileEvidenceListEdits } from './lists.js';
 import { runWatchSweep } from './watches.js';
 import { runUpdateRequestSweep, runReviewingStaleSweep } from '../surfaces/proactive.js';
 import { deadlineCard } from '../surfaces/cards.js';
@@ -59,6 +59,7 @@ export function startScheduler(app) {
   cron.schedule('30 * * * *', async () => {
     for (const org of await db.allOrgs()) {
       if (org.pipeline_list_id) await reconcileListEdits(app.client, org.team_id).catch(() => {});
+      if (org.evidence_list_id) await reconcileEvidenceListEdits(app.client, org.team_id).catch(() => {});
     }
   });
 

@@ -1,13 +1,14 @@
 import { searchWorkspace, detectSearchMode, expandKeywordQuery } from './rts.js';
 import { grantsGov } from '../mcp/grantsgov-client.js';
 import { db } from '../services/db.js';
-import { syncOpportunityToList, syncEvidenceToList } from '../services/lists.js';
+import { syncOpportunityToList, syncEvidenceToList, listLink } from '../services/lists.js';
 import { ensureOppCanvas, refreshOverviewAndRequirements } from '../services/canvas.js';
 import { grantCardV2, forecastCard, evidenceCardV2, confirmCard, pipelineCard } from '../surfaces/cards.js';
 import { buildFeedbackBlocks } from '../surfaces/blocks.js';
 import { stashDraftMarkdown } from './intents.js';
 import { assessFitBatch, extractChecklist } from '../prompts/classifiers.js';
 import { runWorkspaceScan } from '../services/scan.js';
+import { publishHome } from '../surfaces/home.js';
 
 // Un-added search results don't have a DB row to cache fit on — a short
 // in-process TTL map (same spirit as the grantsgov client's own cache) avoids
@@ -105,11 +106,11 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'evidence_locker',
-    description: 'List saved evidence POINTERS (permalinks + tags — never content), or save a new pointer from a search_workspace result. To USE evidence in a draft, re-read content live via search_workspace — the locker stores no text.',
+    description: 'List, save, or delete evidence POINTERS (permalinks + tags — never content). Saves and deletes sync live to the Evidence Locker Slack List and App Home. To USE evidence in a draft, re-read content live via search_workspace — the locker stores no text.',
     input_schema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'save'] },
+        action: { type: 'string', enum: ['list', 'save', 'delete'] },
         channel_id: { type: 'string' }, message_ts: { type: 'string' },
         permalink: { type: 'string' },
         tag: { type: 'string', enum: ['metric', 'story', 'testimonial', 'other'] },
@@ -352,17 +353,59 @@ export function buildToolbelt(ctx) {
         return null;
       });
       if (!summary) return { error: 'Rescan failed — Real-Time Search may be unavailable right now.' };
-      return { ok: true, ...summary, note: `Evidence index rebuilt: ${summary.totalHits} hit(s) across ${summary.channelsCovered} channel(s). This is a SEARCH INDEX only — it does not add anything to the Evidence List, App Home, or org dashboard by itself; nothing else changes until the user explicitly saves a specific item as evidence. Tell the user the index is ready, mention the /org web page shows the full theme breakdown, and that they can now ask you to search for or save specific evidence.` };
+      // Auto-adopt every hit the scan found as a real evidence pointer — the
+      // whole point of "rescan" from the user's side is that the Evidence
+      // List/App Home/org dashboard reflect it immediately, not that a
+      // second, separate save step is required per item. saveEvidence's
+      // (team_id, channel_id, message_ts) unique constraint makes this safe
+      // to run every rescan without creating duplicate rows.
+      let saved = 0;
+      for (const p of summary.pointers ?? []) {
+        try {
+          const { listItemId } = await db.saveEvidence(teamId, {
+            channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
+            tag: p.tag, is_file: p.is_file, saved_by: userId,
+          });
+          const channelInfo = p.channel_id ? await client.conversations.info({ channel: p.channel_id }).catch(() => null) : null;
+          await syncEvidenceToList(client, teamId, {
+            channel_id: p.channel_id, message_ts: p.message_ts, permalink: p.permalink ?? '',
+            tag: p.tag, is_file: p.is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId,
+          }).catch(() => {});
+          saved++;
+        } catch (e) {
+          console.warn('[rescan_workspace] evidence save skipped:', e?.message ?? e);
+        }
+      }
+      const org = await db.getOrg(teamId);
+      const evidenceListUrl = org?.evidence_list_id ? await listLink(client, teamId, org.evidence_list_id).catch(() => null) : null;
+      await publishHome(client, teamId, userId).catch(() => {});
+      return {
+        ok: true, ...summary, evidenceSaved: saved, evidenceListUrl,
+        note: `Evidence index rebuilt and ${saved} item(s) saved to the Evidence Locker (${summary.totalHits} hit(s) across ${summary.channelsCovered} channel(s)). The Evidence List, App Home, and org dashboard are already updated. Tell the user it's done and give them the direct Evidence List link${evidenceListUrl ? ` (${evidenceListUrl})` : ''} so they can review, retag, or delete anything by hand — edits and deletes there sync back automatically.`,
+      };
     },
 
     async evidence_locker({ action, channel_id, message_ts, permalink, tag = 'story', is_file = false }) {
       if (!teamId) return { error: 'No team context' };
       if (action === 'list') return { pointers: await db.listEvidence(teamId) };
-      if (!channel_id || !message_ts) return { error: 'save requires channel_id and message_ts' };
+      if (!channel_id || !message_ts) return { error: `${action} requires channel_id and message_ts` };
+      if (action === 'delete') {
+        const existing = await db.getEvidencePointer(teamId, channel_id, message_ts);
+        await db.deleteEvidence(teamId, channel_id, message_ts);
+        if (existing?.list_item_id) {
+          const org = await db.getOrg(teamId);
+          if (org?.evidence_list_id) {
+            await client.apiCall('slackLists.items.delete', { list_id: org.evidence_list_id, id: existing.list_item_id }).catch(() => {});
+          }
+        }
+        publishHome(client, teamId, userId).catch(() => {});
+        return { ok: true, note: 'Pointer deleted from the locker, List, and App Home.' };
+      }
       const { listItemId } = await db.saveEvidence(teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, saved_by: userId });
       const channelInfo = await client.conversations.info({ channel: channel_id }).catch(() => null);
       syncEvidenceToList(client, teamId, { channel_id, message_ts, permalink: permalink ?? '', tag, is_file, channel_name: channelInfo?.channel?.name, list_item_id: listItemId }).catch(() => {});
-      return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored).' };
+      publishHome(client, teamId, userId).catch(() => {});
+      return { ok: true, note: 'Pointer saved (permalink + tag only — no content stored). Synced to the Evidence List and App Home.' };
     },
 
     // Confirm-before-generate: the model has

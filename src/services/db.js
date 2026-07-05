@@ -394,6 +394,12 @@ export const db = {
       [teamId, channelId, messageTs]);
     return rows[0] ?? null;
   },
+  async deleteEvidence(teamId, channelId, messageTs) {
+    await pool.query('DELETE FROM evidence_pointers WHERE team_id=$1 AND channel_id=$2 AND message_ts=$3', [teamId, channelId, messageTs]);
+  },
+  async deleteEvidenceByListItem(teamId, listItemId) {
+    await pool.query('DELETE FROM evidence_pointers WHERE team_id=$1 AND list_item_id=$2', [teamId, listItemId]);
+  },
   async countEvidence(teamId) {
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM evidence_pointers WHERE team_id=$1', [teamId]);
