@@ -162,96 +162,76 @@ Agents that act need receipts.
     'secondaryColor': '#0c100d',
     'tertiaryColor': '#eab308',
     'fontFamily': '"SF Pro Rounded", "Virgil", "Comic Sans MS", cursive, sans-serif',
-    'fontSize': '14px'
+    'fontSize': '13px'
   },
   'flowchart': {
     'curve': 'linear',
-    'rankSpacing': 50,
+    'rankSpacing': 60,
     'nodeSpacing': 20
   }
 }}%%
 flowchart LR
-  %% Styling Definitions for Dark Mode Sketch (High Contrast Outlines)
-  classDef slackNode fill:none,stroke:#00ffd0,stroke-width:2.5px,color:#ffffff;
-  classDef mcpNode fill:none,stroke:#c084fc,stroke-width:2.5px,color:#ffffff;
-  classDef engineNode fill:none,stroke:#eab308,stroke-width:2px,color:#ffffff;
-  classDef externalNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
+  %% Styling Definitions
+  classDef slackHighlight fill:none,stroke:#00ffd0,stroke-width:2.5px,color:#ffffff;
+  classDef mcpHighlight fill:none,stroke:#c084fc,stroke-width:2.5px,color:#ffffff;
+  classDef engineHighlight fill:none,stroke:#eab308,stroke-width:2px,color:#ffffff;
+  classDef neutralNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
 
-  subgraph C1["1. CLIENT INTERFACES (Slack Workspace)"]
-    direction TB
-    EXT["🤖 Claude / Cursor<br/>HTTP API Client"]
-    DM["💬 Agent DM<br/>[Slack AI Surface]"]
-    MEN["🤖 @mentions<br/>[Slack AI Surface]"]
-    RX["⚡ Reactions / Shortcuts<br/>[Slack AI Surface]"]
+  subgraph C1["Ingestion Feed"]
+    GOV["🌐 Grants.gov API Feed<br/>[Upstream Funding Source JSON]"]
+    GG["📦 grantsgov-mcp client/server<br/>[Orchestrated Model Context Protocol]<br/>src/mcp/grantsgov-server.mjs"]
   end
-  class DM,MEN,RX slackNode;
-  class EXT externalNode;
+  class GG mcpHighlight;
+  class GOV neutralNode;
 
-  subgraph C2["2. APP ENGINE (Grantweaver Service)"]
-    direction TB
-    LOOP["Agent Loop<br/>src/agent/loop.js"]
-    TOOLS["Toolbelt · 8 tools<br/>src/agent/tools.js"]
-    OBS["Observability<br/>src/services/observability.js"]
-    CRON["Scheduler / Cron<br/>src/services/scheduler.js"]
-    INTENTS["Intents Handler<br/>src/agent/intents.js"]
+  subgraph C2["Agent Grounding"]
+    RTS["🔍 Slack RTS API context generator<br/>[Zero-Retention Live Agent Vector Search]<br/>src/agent/rts.js"]
+    SCAN["⚡ Ephemeral Onboarding Scanner<br/>[In-Memory Context Window Grounding]<br/>src/services/scan.js"]
   end
-  class LOOP,TOOLS,INTENTS,CRON,OBS engineNode;
+  class RTS,SCAN slackHighlight;
 
-  subgraph C3["3. DATA & SURFACES"]
-    direction TB
-    GW["🔌 grantweaver-mcp<br/>[MCP Server - Exposed]"]
-    GG["📦 grantsgov-mcp<br/>[MCP Server - Consumed]"]
-    RTS["🔍 Slack RTS API<br/>[Slack Real-Time Search]"]
-    DB[("🛢️ Postgres Database<br/>pointers only, no text")]
-    HOME["🏠 App Home<br/>[Slack AI Surface]"]
-    WEB["💻 Evidence Pages<br/>marketing & web view"]
-    LISTS["📋 Slack Lists ×2<br/>[Slack AI Surface]"]
-    CANVAS["📄 Canvases<br/>[Slack AI Surface]"]
+  subgraph C3["Execution Loop"]
+    LOOP["🤖 Multi-Agent Reasoning Loop<br/>[Stateful ReAct Tool Call Orchestrator]<br/>src/agent/loop.js"]
+    TOOLS["🛠️ Context-Aware Toolbelt<br/>[8 Live Slack Integration Bindings]<br/>src/agent/tools.js"]
+    DM["💬 Slack Assistant Interface<br/>[Streaming Token-by-Token Threading]<br/>src/assistant.js"]
+    CANVAS["📄 Slack Canvas API Writer<br/>[Persistent Workspace Document Sync]<br/>src/services/canvas.js"]
   end
-  class DB greenNode;
-  class RTS,HOME,LISTS,CANVAS slackNode;
-  class GG,GW mcpNode;
-  class WEB externalNode;
+  class LOOP,TOOLS engineHighlight;
+  class DM,CANVAS slackHighlight;
 
-  GOV["🌐 api.grants.gov<br/>external API"]
-  class GOV externalNode;
+  subgraph C4["State Storage"]
+    DB[("🛢️ Postgres Trust Engine<br/>[Write-Isolation Metadata Pointer Store]<br/>src/services/db.js")]
+    LISTS["📋 Two-Way Slack Lists Sync<br/>[Pipeline Board Bi-Directional State]<br/>src/services/lists.js"]
+    CRON["⏰ Event-Driven Cron Scheduler<br/>[Proactive Context Nudges & Digest Loops]<br/>src/services/scheduler.js"]
+    GW["🔌 grantweaver-mcp gateway<br/>[Exposed Local Tool Model Context Protocol]<br/>src/mcp/grantweaver-server.mjs"]
+  end
+  class DB,LISTS slackHighlight;
+  class GW mcpHighlight;
+  class CRON engineHighlight;
 
-  %% Subgraph Styles - Deep Shading for Groups
-  style C1 fill:#0e1b13,stroke:#00ffd0,stroke-width:1.5px,stroke-dasharray: 5 5;
-  style C2 fill:#201804,stroke:#eab308,stroke-width:1.5px,stroke-dasharray: 5 5;
-  style C3 fill:#131517,stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray: 5 5;
+  style C1 fill:#1c170c,stroke:#eab308,stroke-width:1.5px,stroke-dasharray: 5 5;
+  style C2 fill:#0b1d1c,stroke:#00ffd0,stroke-width:1.5px,stroke-dasharray: 5 5;
+  style C3 fill:#181021,stroke:#c084fc,stroke-width:1.5px,stroke-dasharray: 5 5;
+  style C4 fill:#0a1711,stroke:#2d6a4f,stroke-width:1.5px,stroke-dasharray: 5 5;
 
-  %% --- CONNECTIONS ---
+  %% Flow Connections
+  GG -- "fetch feed" --> GOV
+  GG -- "live search" --> TOOLS
   
-  %% Clients -> Engine
-  EXT -- "HTTP" --> GW
-  DM --> LOOP
-  MEN --> LOOP
-  RX --> INTENTS
-
-  %% Engine internal
+  RTS -- "zero-retention query" --> TOOLS
+  SCAN -- "ephemeral theme index" --> LOOP
+  
+  DM -- "user prompt" --> LOOP
   LOOP --> TOOLS
-  LOOP --> OBS
-
-  %% Engine -> Data & Surfaces
-  TOOLS -- "RTS" --> RTS
-  RTS -- "search" --> C1
   
-  TOOLS -- "MCP" --> GG
-  GG -- "fetch" --> GOV
+  TOOLS -- "write LOI with citations" --> CANVAS
+  TOOLS -- "mirror pipeline stage" --> LISTS
+  TOOLS -- "save metadata pointers" --> DB
   
-  TOOLS --> DB
-  TOOLS --> CANVAS
-  TOOLS --> LISTS
+  CRON -- "trigger alerts" --> LISTS
+  CRON -- "background status check" --> DB
   
-  INTENTS --> CANVAS
-  
-  CRON <--> LISTS
-  CRON --> DB
-  OBS --> DB
-  GW --- DB
-  HOME --- DB
-  WEB --- DB
+  GW -- "read-only developer queries" --> DB
 ```
 
 And one turn, end to end. This is why drafts can cite without storing:

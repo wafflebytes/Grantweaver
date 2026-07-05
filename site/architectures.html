@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.5">
+  <title>Grantweaver: Alternative Product Architectures</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <style>
+    :root {
+      --bg: #0c100d;
+      --card-bg: #121613;
+      --text: #FAF7F0;
+      --text-muted: #8c9b90;
+      --green-glow: #00ffd0;
+      --gold-glow: #eab308;
+      --purple-glow: #c084fc;
+      --border: rgba(250, 247, 240, 0.1);
+      --font: 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    header {
+      padding: 24px 40px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(12, 16, 13, 0.8);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 img {
+      height: 32px;
+      width: 32px;
+    }
+
+    header .subtitle {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      height: calc(100vh - 81px);
+    }
+
+    /* Left Sidebar Navigation */
+    .sidebar {
+      width: 340px;
+      border-right: 1px solid var(--border);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      background: rgba(18, 22, 19, 0.5);
+    }
+
+    .sidebar h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .tab-btn {
+      width: 100%;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 16px;
+      border-radius: 12px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .tab-btn:hover {
+      background: rgba(250, 247, 240, 0.03);
+      color: var(--text);
+    }
+
+    .tab-btn.active {
+      background: var(--card-bg);
+      border-color: rgba(250, 247, 240, 0.15);
+      color: var(--text);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .tab-btn .tab-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tab-btn .tab-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* Right Diagram Rendering Workspace */
+    .workspace {
+      flex: 1;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .workspace-header {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .workspace-header h3 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .workspace-header p {
+      color: var(--text-muted);
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+
+    .diagram-container {
+      flex: 1;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 480px;
+      box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+      position: relative;
+      overflow: auto;
+    }
+
+    .mermaid {
+      width: 100%;
+      height: auto;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .mermaid.rendered {
+      opacity: 1;
+    }
+
+    /* Loader Indicator */
+    .loader {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    .loader.visible {
+      display: block;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      themeVariables: {
+        background: '#0c100d',
+        primaryColor: '#0c100d',
+        primaryTextColor: '#f8fafc',
+        primaryBorderColor: '#2d6a4f',
+        lineColor: '#e2e8f0',
+        secondaryColor: '#0c100d',
+        tertiaryColor: '#eab308',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        fontSize: '14px'
+      },
+      flowchart: {
+        curve: 'linear',
+        rankSpacing: 50,
+        nodeSpacing: 20
+      }
+    });
+
+    const diagrams = {
+      direction1: {
+        title: "1. Slack-Native AI Assistant",
+        desc: "Focuses heavily on deep Slack AI surface flows, with a very minimal database footprint (strictly metadata pointers).",
+        code: `flowchart TB
+  classDef slackNode fill:none,stroke:#00ffd0,stroke-width:2.5px,color:#ffffff;
+  classDef engineNode fill:none,stroke:#eab308,stroke-width:2px,color:#ffffff;
+  classDef dbNode fill:none,stroke:#c084fc,stroke-width:2px,color:#ffffff;
+
+  subgraph SLACK["SLACK WORKSPACE (Core UI Layer)"]
+    direction LR
+    DM["💬 Agent DM"]
+    MEN["🤖 @mentions"]
+    HOME["🏠 App Home"]
+    LISTS["📋 Slack Lists"]
+    CANVAS["📄 Canvases"]
+  end
+  class DM,MEN,HOME,LISTS,CANVAS slackNode;
+  style SLACK fill:#0e1b13,stroke:#00ffd0,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  subgraph APP["GRANTWEAVER SERVICE"]
+    LOOP["Agent Loop"] --> TOOLS["Toolbelt"]
+  end
+  class LOOP,TOOLS engineNode;
+  style APP fill:#201804,stroke:#eab308,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  DB[("🛢️ Postgres Database<br/>(Pointers Only)")]
+  class DB dbNode;
+
+  DM --> LOOP
+  MEN --> LOOP
+  TOOLS --> LISTS
+  TOOLS --> CANVAS
+  TOOLS --> DB`
+      },
+      direction2: {
+        title: "2. MCP-First Agentic Gateway",
+        desc: "Redesigned as a developer/agentic platform where the MCP servers are the focal center, serving Cursor, Claude, and Agentforce.",
+        code: `flowchart LR
+  classDef agentNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
+  classDef mcpNode fill:none,stroke:#c084fc,stroke-width:2.5px,color:#ffffff;
+  classDef dbNode fill:none,stroke:#00ffd0,stroke-width:2px,color:#ffffff;
+
+  subgraph AGENTS["EXTERNAL DEVELOPER & AGENT LAYER"]
+    direction TB
+    C["Cursor IDE"]
+    CL["Claude Agent"]
+    AF["Agentforce"]
+  end
+  class C,CL,AF agentNode;
+  style AGENTS fill:#131517,stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  subgraph MCP["MODEL CONTEXT PROTOCOL LAYER"]
+    GW["🔌 grantweaver-mcp"]
+    GG["📦 grantsgov-mcp"]
+  end
+  class GW,GG mcpNode;
+  style MCP fill:#1e1b4b,stroke:#c084fc,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  DB[("🛢️ Pipeline DB")]
+  class DB dbNode;
+  GOV["🌐 api.grants.gov"]
+  class GOV agentNode;
+
+  C --> GW
+  CL --> GW
+  AF --> GW
+  GW --> DB
+  GG --> GOV`
+      },
+      direction3: {
+        title: "3. Standalone Enterprise Web Hub",
+        desc: "A hybrid model placing the Web Portal dashboard at the center of the architecture, where Slack is primarily used as a message collector.",
+        code: `flowchart TB
+  classDef webNode fill:none,stroke:#38bdf8,stroke-width:2.5px,color:#ffffff;
+  classDef slackNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
+  classDef dbNode fill:none,stroke:#c084fc,stroke-width:2px,color:#ffffff;
+
+  subgraph WEB["ENTERPRISE WEB PORTAL (/org/token)"]
+    direction LR
+    DASH["📊 Analytics Dashboard"]
+    BOARD["💻 Board Shareable Page"]
+    SET["⚙️ Admin Panel"]
+  end
+  class DASH,BOARD,SET webNode;
+  style WEB fill:#0c4a6e,stroke:#38bdf8,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  DB[("🛢️ Central Database")]
+  class DB dbNode;
+
+  subgraph SLACK["SLACK INTAKE BOT"]
+    DM["Agent DM"]
+    RX[" Reactions"]
+  end
+  class DM,RX slackNode;
+  style SLACK fill:#131517,stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  DM --> DB
+  RX --> DB
+  DASH --> DB
+  BOARD --> DB
+  SET --> DB`
+      },
+      direction4: {
+        title: "4. Zero-Trust Security Sandbox",
+        desc: "An architecture focused entirely on security boundaries, emphasizing live search and zero content retention inside the app databases.",
+        code: `flowchart LR
+  classDef secureNode fill:none,stroke:#ef4444,stroke-width:2.5px,color:#ffffff;
+  classDef engineNode fill:none,stroke:#eab308,stroke-width:2px,color:#ffffff;
+  classDef dbNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
+
+  subgraph SLACK["Slack Privacy Boundary"]
+    direction TB
+    DATA["Slack Messages / Files"]
+  end
+  class DATA secureNode;
+  style SLACK fill:#450a0a,stroke:#ef4444,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  RTS["🔍 Slack RTS API<br/>(Live Search - Zero Retention)"]
+  class RTS secureNode;
+
+  subgraph APP["Grantweaver Engine (Zero Retention)"]
+    LOOP["Agent Reasoning"]
+  end
+  class LOOP engineNode;
+  style APP fill:#201804,stroke:#eab308,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  DB[("🛢️ Postgres Database (Pointers Only)")]
+  class DB dbNode;
+
+  LOOP --> RTS
+  RTS --> DATA
+  LOOP --> DB`
+      },
+      direction5: {
+        title: "5. Proactive Automation Loop",
+        desc: "Focuses on cron-driven scheduler actions, scrapers, and alerts rather than user-triggered chat commands.",
+        code: `flowchart TB
+  classDef cronNode fill:none,stroke:#f97316,stroke-width:2.5px,color:#ffffff;
+  classDef extNode fill:none,stroke:#94a3b8,stroke-width:1.5px,color:#94a3b8;
+  classDef slackNode fill:none,stroke:#00ffd0,stroke-width:2px,color:#ffffff;
+
+  CRON["⏰ Scheduler & Scraper<br/>(src/services/scheduler.js)"]
+  class CRON cronNode;
+
+  subgraph SCRAPE["Scraper Engine"]
+    direction LR
+    GG["📦 grantsgov-mcp"]
+    GOV["api.grants.gov"]
+  end
+  class GG mcapNode;
+  class GOV extNode;
+  style SCRAPE fill:#131517,stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  subgraph ACTIONS["Proactive Slack Actions"]
+    LISTS["📋 Update Pipeline Lists"]
+    DIGEST["✉️ Send Proactive Digests"]
+    ALERT["🚨 Deadline Alerts"]
+  end
+  class LISTS,DIGEST,ALERT slackNode;
+  style ACTIONS fill:#0e1b13,stroke:#00ffd0,stroke-width:1.5px,stroke-dasharray: 5 5;
+
+  CRON --> GG
+  GG --> GOV
+  CRON --> ACTIONS`
+      }
+    };
+
+    let activeTab = 'direction1';
+
+    function switchTab(key) {
+      if (activeTab === key) return;
+      
+      const prevBtn = document.getElementById(`btn-${activeTab}`);
+      if (prevBtn) prevBtn.classList.remove('active');
+      
+      activeTab = key;
+      const nextBtn = document.getElementById(`btn-${activeTab}`);
+      if (nextBtn) nextBtn.classList.add('active');
+
+      renderActiveDiagram();
+    }
+
+    async function renderActiveDiagram() {
+      const container = document.getElementById('diagram');
+      const loader = document.getElementById('loader');
+      
+      container.classList.remove('rendered');
+      loader.classList.add('visible');
+
+      const data = diagrams[activeTab];
+      
+      document.getElementById('workspace-title').innerText = data.title;
+      document.getElementById('workspace-desc').innerText = data.desc;
+
+      // Clean the container
+      container.innerHTML = `<div class="mermaid">${data.code}</div>`;
+      
+      try {
+        await mermaid.run({
+          nodes: container.querySelectorAll('.mermaid')
+        });
+        const renderedEl = container.querySelector('.mermaid');
+        if (renderedEl) {
+          renderedEl.classList.add('rendered');
+        }
+      } catch (err) {
+        console.error("Mermaid Render Error:", err);
+      } finally {
+        loader.classList.remove('visible');
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      renderActiveDiagram();
+    });
+  </script>
+</head>
+<body>
+  <header>
+    <h1><img src="logo.png" alt=""> Grantweaver</h1>
+    <span class="subtitle">Architectural & Product Directions</span>
+  </header>
+
+  <main>
+    <div class="sidebar">
+      <h2>Select Architecture</h2>
+      <button class="tab-btn active" id="btn-direction1" onclick="switchTab('direction1')">
+        <span class="tab-title">💬 1. Slack-Native AI</span>
+        <span class="tab-desc">Slack AI surfaces, zero web footprint, database pointers only.</span>
+      </button>
+      <button class="tab-btn" id="btn-direction2" onclick="switchTab('direction2')">
+        <span class="tab-title">🔌 2. MCP-First Gateway</span>
+        <span class="tab-desc">API gateway serving Cursor, Claude, & Agentforce.</span>
+      </button>
+      <button class="tab-btn" id="btn-direction3" onclick="switchTab('direction3')">
+        <span class="tab-title">💻 3. Enterprise Web Hub</span>
+        <span class="tab-desc">Central dashboard for admin/reporting with Slack intake.</span>
+      </button>
+      <button class="tab-btn" id="btn-direction4" onclick="switchTab('direction4')">
+        <span class="tab-title">🛡️ 4. Zero-Trust Sandbox</span>
+        <span class="tab-desc">Ultimate privacy, live search API, zero content storage.</span>
+      </button>
+      <button class="tab-btn" id="btn-direction5" onclick="switchTab('direction5')">
+        <span class="tab-title">⏰ 5. Automation Loop</span>
+        <span class="tab-desc">Cron-driven Scraper, weekly digest, deadline alerts.</span>
+      </button>
+    </div>
+
+    <div class="workspace">
+      <div class="workspace-header">
+        <h3 id="workspace-title">1. Slack-Native AI Assistant</h3>
+        <p id="workspace-desc">Focuses heavily on deep Slack AI surface flows, with a very minimal database footprint (strictly metadata pointers).</p>
+      </div>
+
+      <div class="diagram-container">
+        <div id="loader" class="loader">Rendering Diagram...</div>
+        <div id="diagram"></div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
