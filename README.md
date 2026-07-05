@@ -151,55 +151,96 @@ Agents that act need receipts.
 ## How it fits together
 
 ```mermaid
+%%{init: {'theme': 'dark', 'look': 'handDrawn', 'flowchart': {'curve': 'linear'}}}%%
 flowchart TB
-  subgraph SLACK["Slack workspace"]
+  %% Layer 1: Inputs
+  subgraph INPUTS["🌐 CLIENT INPUTS & TRIGGERS"]
     direction LR
-    DM["Agent DM<br/>streamed replies · task timeline"]
-    MEN["@mentions<br/>in channel threads"]
-    HOME["App Home<br/>board · Impact Meter"]
-    LISTS["Slack Lists ×2<br/>Pipeline · Evidence Locker"]
-    CANVAS["Canvases<br/>one per opportunity"]
+    EXT["🤖 Claude / Cursor / Agentforce<br/>HTTP + bearer auth"]
+    DM["💬 Agent DM<br/>streamed replies · task timeline"]
+    MEN["💬 @mentions<br/>in channel threads"]
     RX["🧵 reactions · shortcuts<br/>/grantweaver commands"]
   end
 
-  subgraph APP["Grantweaver · Node + Bolt JS · one Railway service"]
+  %% Layer 2: Engine
+  subgraph ENGINE["🚂 GRANTWEAVER APP ENGINE (Railway Service)"]
     direction LR
-    LOOP["Agent loop<br/>evidence prefetch → LLM tool loop"]
-    TOOLS["Toolbelt · 8 tools"]
-    INTENTS["Confirm-before-generate<br/>draft · revise · export"]
-    CRON["Scheduler<br/>digests · nudges · watches ·<br/>List reconcile · memories"]
-    OBS["Observability<br/>run tracker · audit log"]
+    VERIFY["🛡️ Signature Verification<br/>Slack Secret / Bearer Auth"]
+    ROUTER["⚡ Bolt.js Event Router<br/>events · actions · commands"]
+    LOOP["🤖 Agent loop<br/>evidence prefetch → LLM loop"]
+    TOOLS["🛠️ Toolbelt<br/>8 orchestration tools"]
+    CRON["⏰ Scheduler & Sweeper<br/>watches · digests · memories"]
+    OBS["📊 Observability<br/>tracker · audit log"]
   end
 
-  DB[("Postgres<br/>pointers and metadata only,<br/>content keys rejected at write time")]
-
-  subgraph MCP["MCP layer"]
+  %% Layer 3: Outputs
+  subgraph OUTPUTS["💾 OUTPUT SURFACES & DATA STORAGE"]
     direction LR
-    GG["grantsgov-mcp<br/>server we built and consume"]
-    GW["grantweaver-mcp<br/>server we expose · 6 tools"]
+    subgraph SURFACES["💬 Slack Surfaces"]
+      direction TB
+      HOME["App Home<br/>board · Impact Meter"]
+      LISTS["Slack Lists ×2 (Pipeline & Evidence Locker)<br/>slackLists.* API"]
+      CANVAS["Canvases (one per opportunity)<br/>canvases.edit API"]
+    end
+    
+    subgraph STORAGE["🗄️ Database & MCP integrations"]
+      direction TB
+      DB[("Postgres DB<br/>pointers & metadata only")]
+      WEB["/org/&lt;token&gt; evidence page<br/>+ marketing site"]
+      GW["grantweaver-mcp<br/>server we expose · 6 tools"]
+      GG["grantsgov-mcp<br/>server we built & consume"]
+    end
   end
 
   GOV["api.grants.gov"]
-  WEB["/org/&lt;token&gt; evidence page<br/>+ marketing site"]
-  EXT["Claude · Cursor · Agentforce"]
 
-  DM --> LOOP
-  MEN --> LOOP
-  RX --> INTENTS
+  %% Class styling for clean dark mode
+  classDef slack fill:#0f172a,stroke:#38bdf8,stroke-width:1px,color:#f8fafc;
+  classDef app fill:#1c1917,stroke:#eab308,stroke-width:1px,color:#fdfbf7;
+  classDef mcp fill:#1e1b4b,stroke:#c084fc,stroke-width:1px,color:#faf5ff;
+  classDef db fill:#022c22,stroke:#22c55e,stroke-width:1px,color:#f0fdf4;
+  classDef ext fill:#18181b,stroke:#78716c,stroke-width:1px,color:#fafaf9;
+
+  class DM,MEN,RX,HOME,LISTS,CANVAS slack;
+  class VERIFY,ROUTER,LOOP,TOOLS,CRON,OBS app;
+  class GG,GW mcp;
+  class DB db;
+  class EXT,GOV,WEB ext;
+
+  %% Subgraph styling
+  style INPUTS fill:transparent,stroke:#475569,stroke-width:1px,stroke-dasharray: 5 5
+  style ENGINE fill:transparent,stroke:#ca8a04,stroke-width:1.5px
+  style OUTPUTS fill:transparent,stroke:#475569,stroke-width:1px,stroke-dasharray: 5 5
+  style SURFACES fill:#0f172a,stroke:#1e293b,stroke-width:1px
+  style STORAGE fill:#022c22,stroke:#064e3b,stroke-width:1px
+
+  %% Connections (Top to Middle)
+  DM --> VERIFY
+  MEN --> VERIFY
+  RX --> VERIFY
+  EXT --> VERIFY
+  
+  VERIFY --> ROUTER
+  ROUTER --> LOOP
+  ROUTER --> CRON
   LOOP --> TOOLS
-  TOOLS -- "assistant.search.context<br/>(RTS · zero retention)" --> SLACK
-  TOOLS -- "MCP client" --> GG --> GOV
-  TOOLS -- "canvases.edit" --> CANVAS
-  TOOLS -- "slackLists.*" --> LISTS
+  LOOP --> OBS
+
+  %% Connections (Middle to Bottom)
+  TOOLS --> CANVAS
+  TOOLS --> LISTS
   TOOLS --> DB
-  INTENTS --> CANVAS
+  TOOLS --> GG --> GOV
+  OBS --> DB
   CRON <--> LISTS
   CRON --> DB
-  LOOP --> OBS --> DB
+  GW --- DB
   HOME --- DB
   WEB --- DB
-  EXT -- "HTTP + bearer" --> GW --- DB
 ```
+
+> [!TIP]
+> You can open the editable Excalidraw version of this system architecture directly: [architecture.excalidraw](file:///Users/chaitanya/grantweaver/assets/architecture.excalidraw) (drag and drop it into [excalidraw.com](https://excalidraw.com) or open it using the Excalidraw IDE extension).
 
 And one turn, end to end. This is why drafts can cite without storing:
 
